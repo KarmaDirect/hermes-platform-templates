@@ -69,14 +69,14 @@ RUN mkdir -p /opt/hermes-template/config \
  && chown -R 1000:1000 /opt/hermes-template /data /skills /profiles
 
 # Inject our staged template files
-COPY --from=assets --chown=1000:1000 /staging/config/      /opt/hermes-template/config/
-COPY --from=assets --chown=1000:1000 /staging/skills/      /opt/hermes-template/skills/
-COPY --from=assets --chown=1000:1000 /staging/bootstrap.sh /usr/local/bin/bootstrap.sh
+COPY --from=assets --chown=10000:10000 /staging/config/      /opt/hermes-template/config/
+COPY --from=assets --chown=10000:10000 /staging/skills/      /opt/hermes-template/skills/
+COPY --from=assets --chown=10000:10000 /staging/bootstrap.sh /usr/local/bin/bootstrap.sh
 
 RUN chmod +x /usr/local/bin/bootstrap.sh
 
 # Drop back to the unprivileged user shipped with the base image
-USER 1000:1000
+USER 10000:10000
 
 # Working directory used by Hermes server (assumed)
 WORKDIR /home/hermes
