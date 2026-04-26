@@ -68,6 +68,14 @@ services:
       hermes.platform.client: ${CLIENT_SLUG:-unknown}
       hermes.platform.version: v1
       coolify.managed: "true"
+      # ----- Traefik routing (Coolify proxy) -----
+      # Container must be on the `coolify` network for Traefik DNS resolution.
+      traefik.enable: "true"
+      traefik.docker.network: "coolify"
+      traefik.http.services.hermes.loadbalancer.server.port: "9119"
+    networks:
+      - default
+      - coolify
 
   # ---------------------------------------------------------------------------
   # Optional: Paperclip (issue tracker / task queue used by some skills)
@@ -103,3 +111,7 @@ volumes:
     name: hermes_${CLIENT_SLUG:-unknown}_profiles
   paperclip_data:
     name: paperclip_${CLIENT_SLUG:-unknown}_data
+
+networks:
+  coolify:
+    external: true
