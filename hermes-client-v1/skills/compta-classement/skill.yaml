@@ -1,0 +1,33 @@
+name: compta-classement
+version: 1.0.0
+description: Classe automatiquement factures, tickets et justificatifs reçus par email/WhatsApp.
+author: Hermès Platform
+category: finance
+triggers:
+  - type: channel-message
+    channels: [email, whatsapp]
+    match: { has_attachment: true }
+  - type: webhook
+    path: /compta/ingest
+inputs:
+  document_url: string
+  source_channel: string
+  sender: string?
+outputs:
+  document_type: string              # "facture_fournisseur" | "ticket" | "note_frais" | "devis" | "inconnu"
+  vendor: string?
+  amount_eur: number?
+  vat_eur: number?
+  category: string?
+  storage_url: string
+  exported_to: array                 # ["pennylane", "qonto", "drive"]
+requires:
+  llm: gemini-vision
+  external_api_optional: [pennylane, qonto, google-drive]
+config:
+  ocr_provider: "gemini"
+  default_category_map:
+    btp: ["materiaux", "outillage", "carburant", "sous-traitance"]
+  storage_backend: "supabase-storage"  # bucket "compta-{slug}"
+human_in_the_loop:
+  required_for: ["category_unknown", "amount_gt_500"]

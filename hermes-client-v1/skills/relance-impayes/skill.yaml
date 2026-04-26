@@ -1,0 +1,36 @@
+name: relance-impayes
+version: 1.0.0
+description: Relance les factures non payées avec un ton humain et progressif (J+7, J+15, J+30).
+author: Hermès Platform
+category: finance
+triggers:
+  - type: cron
+    schedule: "0 9 * * *"            # tous les jours 9h
+  - type: webhook
+    path: /relance-impayes/run
+inputs:
+  org_id: string?
+outputs:
+  invoices_processed: number
+  emails_sent: number
+  sms_sent: number
+  escalations: number
+requires:
+  channels: [email]
+  channels_optional: [whatsapp, telegram]
+  llm: anthropic-haiku
+  data_sources: [supabase.invoices]
+config:
+  steps:
+    - day: 7
+      channel: email
+      tone: "courtois"
+    - day: 15
+      channel: email+sms
+      tone: "ferme mais respectueux"
+    - day: 30
+      channel: telegram_to_owner
+      action: "escalade"
+  template_vars: ["client_name", "invoice_number", "amount_eur", "due_date", "payment_link"]
+human_in_the_loop:
+  required_for: ["escalade", "amount_gt_2000"]

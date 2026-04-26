@@ -1,0 +1,27 @@
+name: briefing-quotidien
+version: 1.0.0
+description: Résumé matinal envoyé sur Telegram au patron — RDV du jour, urgences, KPI clés.
+author: Hermès Platform
+category: management
+triggers:
+  - type: cron
+    schedule: "0 7 * * 1-6"          # lun-sam 7h locale
+inputs:
+  date: date?
+outputs:
+  briefing_text: string
+  sent_to: string
+requires:
+  channels: [telegram]
+  llm: anthropic-haiku
+  data_sources: [supabase.appointments, supabase.invoices, supabase.contacts]
+config:
+  sections:
+    - rdv_du_jour
+    - chantiers_actifs
+    - factures_a_relancer
+    - meteo
+    - rappels_perso
+  style: "court, percutant, max 6 lignes"
+human_in_the_loop:
+  required: false

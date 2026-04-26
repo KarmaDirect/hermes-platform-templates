@@ -1,0 +1,107 @@
+# =============================================================================
+# Hermes Client Edition v1 — docker-compose
+# =============================================================================
+# One-service-per-client stack. Designed to be deployed by the Hermes Platform
+# control-plane via Coolify, with env vars injected per tenant.
+#
+# Profiles:
+#   default          -> hermes only
+#   with-paperclip   -> hermes + paperclip (issue tracker, optional)
+#
+# Volumes are NAMED so Coolify keeps them across redeploys.
+# =============================================================================
+
+services:
+  hermes:
+    container_name: hermes-${CLIENT_SLUG:-unknown}
+    image: hermes-client:${HERMES_TEMPLATE_VERSION:-v1}
+    build:
+      context: .
+      dockerfile: Dockerfile.hermes
+    restart: unless-stopped
+    ports:
+      - "${HERMES_HTTP_PORT:-8642}:8642"
+      # Internal admin dashboard — bind to localhost only by default
+      - "127.0.0.1:${HERMES_ADMIN_PORT:-9119}:9119"
+    environment:
+      # ----- Identity -----
+      CLIENT_NAME:         ${CLIENT_NAME}
+      CLIENT_SLUG:         ${CLIENT_SLUG}
+      CLIENT_VERTICAL:     ${CLIENT_VERTICAL:-generic}
+      CLIENT_BRAND_COLOR:  ${CLIENT_BRAND_COLOR:-#3b82f6}
+      CLIENT_TONE:         ${CLIENT_TONE:-pro}
+
+      # ----- Hermes auth -----
+      HERMES_API_TOKEN:    ${HERMES_API_TOKEN}
+
+      # ----- LLM providers -----
+      ANTHROPIC_API_KEY:   ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY:      ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY:      ${OPENAI_API_KEY:-}
+
+      # ----- Channels (empty = disabled at bootstrap) -----
+      VAPI_API_KEY:           ${VAPI_API_KEY:-}
+      WHATSAPP_TOKEN:         ${WHATSAPP_TOKEN:-}
+      TELEGRAM_BOT_TOKEN:     ${TELEGRAM_BOT_TOKEN:-}
+      RESEND_API_KEY:         ${RESEND_API_KEY:-}
+      INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN:-}
+
+      # ----- Skill activation list -----
+      ENABLED_SKILLS:      ${ENABLED_SKILLS:-reception-call,briefing-quotidien}
+
+      # ----- Supabase write-back (Hermes Platform DB) -----
+      SUPABASE_URL:                ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY:   ${SUPABASE_SERVICE_ROLE_KEY:-}
+
+      # ----- Runtime tuning -----
+      TZ:                  ${TZ:-Europe/Paris}
+      LOG_LEVEL:           ${LOG_LEVEL:-info}
+    volumes:
+      - hermes_data:/data
+      - hermes_skills:/skills
+      - hermes_profiles:/profiles
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8642/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    labels:
+      hermes.platform.client: ${CLIENT_SLUG:-unknown}
+      hermes.platform.version: v1
+      coolify.managed: "true"
+
+  # ---------------------------------------------------------------------------
+  # Optional: Paperclip (issue tracker / task queue used by some skills)
+  # Activate with:  docker compose --profile with-paperclip up -d
+  # ---------------------------------------------------------------------------
+  paperclip:
+    container_name: paperclip-${CLIENT_SLUG:-unknown}
+    image: nousresearch/paperclip:latest
+    profiles: ["with-paperclip"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PAPERCLIP_PORT:-7777}:7777"
+    environment:
+      CLIENT_SLUG:           ${CLIENT_SLUG}
+      PAPERCLIP_API_TOKEN:   ${PAPERCLIP_API_TOKEN:-}
+      HERMES_BASE_URL:       http://hermes:8642
+      HERMES_API_TOKEN:      ${HERMES_API_TOKEN}
+    volumes:
+      - paperclip_data:/data
+    depends_on:
+      hermes:
+        condition: service_healthy
+    labels:
+      hermes.platform.client: ${CLIENT_SLUG:-unknown}
+      coolify.managed: "true"
+
+volumes:
+  hermes_data:
+    name: hermes_${CLIENT_SLUG:-unknown}_data
+  hermes_skills:
+    name: hermes_${CLIENT_SLUG:-unknown}_skills
+  hermes_profiles:
+    name: hermes_${CLIENT_SLUG:-unknown}_profiles
+  paperclip_data:
+    name: paperclip_${CLIENT_SLUG:-unknown}_data

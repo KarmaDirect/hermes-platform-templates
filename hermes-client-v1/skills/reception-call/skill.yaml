@@ -1,0 +1,34 @@
+name: reception-call
+version: 1.0.0
+description: Standard téléphonique IA 24/7 connecté à Vapi — qualifie l'appel, prend RDV ou route.
+author: Hermès Platform
+category: communication
+triggers:
+  - type: webhook
+    path: /vapi/incoming-call
+    method: POST
+inputs:
+  caller_phone: string
+  caller_name: string?
+  transcript: string?
+  vapi_call_id: string
+outputs:
+  qualified: boolean
+  appointment_booked: boolean
+  appointment_at: datetime?
+  next_action: string                # "appointment" | "callback" | "voicemail" | "transfer"
+  summary: string
+  crm_contact_id: string?
+requires:
+  channels: [vapi]
+  llm: anthropic-sonnet
+  skills_optional: [crm-client-lookup]
+config:
+  max_call_duration_sec: 480
+  out_of_hours_message: "Notre équipe est disponible du lundi au vendredi de 8h à 19h."
+  vertical_prompts:
+    btp: "Tu es la standardiste IA d'une entreprise de BTP. Qualifie : type de chantier, urgence, budget, code postal."
+    restauration: "Tu es la standardiste IA d'un restaurant. Réservation, allergies, nb couverts."
+    generic: "Tu es la standardiste IA. Qualifie le besoin et propose un RDV."
+human_in_the_loop:
+  required: false
