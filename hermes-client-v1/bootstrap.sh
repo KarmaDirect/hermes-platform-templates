@@ -29,12 +29,10 @@ PROFILES_DIR="/profiles"
 READY_FILE="${DATA_DIR}/.ready"
 INIT_MARKER="${DATA_DIR}/.bootstrapped"
 
-# Server command — adjust here if the upstream binary path changes.
-# Common alternatives observed:
-#   hermes serve --host 0.0.0.0 --port 8642
-#   hermes-agent --listen 0.0.0.0:8642
-#   python -m hermes.server
-SERVER_CMD=( hermes serve --host 0.0.0.0 --port 8642 )
+# Confirmed via `docker run nousresearch/hermes-agent:v2026.4.16 dashboard --help` :
+#   - Binary is at /opt/hermes/.venv/bin/hermes
+#   - HTTP/dashboard server : `hermes dashboard --host 0.0.0.0 --port 9119 --no-open --insecure`
+SERVER_CMD=( /opt/hermes/.venv/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open --insecure )
 
 # ---------- Required env ----------
 : "${CLIENT_SLUG:?CLIENT_SLUG must be set}"

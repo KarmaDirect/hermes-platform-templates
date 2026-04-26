@@ -89,7 +89,7 @@ EXPOSE 8642 9119
 # Healthcheck. Bootstrap touches /data/.ready once channels + skills are loaded,
 # THEN the FastAPI /health endpoint is the source of truth.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
-  CMD curl -fsS http://127.0.0.1:8642/health >/dev/null || exit 1
+  CMD curl -fsS http://127.0.0.1:9119/health >/dev/null || exit 1
 
 # Use tini as PID 1 to handle signals + zombie reaping cleanly.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/bootstrap.sh"]
