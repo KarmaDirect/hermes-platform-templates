@@ -75,8 +75,9 @@ COPY --from=assets --chown=10000:10000 /staging/bootstrap.sh /usr/local/bin/boot
 
 RUN chmod +x /usr/local/bin/bootstrap.sh
 
-# Drop back to the unprivileged user shipped with the base image
-USER 10000:10000
+# Stay root: bootstrap.sh chowns the volumes then drops to hermes via gosu.
+# Root is required at boot because Coolify-managed volumes are owned by root.
+USER root
 
 # Working directory used by Hermes server (assumed)
 WORKDIR /home/hermes

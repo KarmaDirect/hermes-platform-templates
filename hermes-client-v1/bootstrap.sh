@@ -55,6 +55,15 @@ export SUPABASE_URL="${SUPABASE_URL:-}"
 export SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:-}"
 export ENABLED_SKILLS="${ENABLED_SKILLS:-reception-call,briefing-quotidien}"
 
+# Boot in root: chown the volumes (created root-owned by Docker) to hermes (10000),
+# then re-exec ourselves as hermes via gosu. Once we're hermes, this block is skipped.
+if [[ "$(id -u)" == "0" ]]; then
+  for d in "${DATA_DIR}" "${PROFILES_DIR}" "${SKILLS_DIR}"; do
+    [[ -d "$d" ]] && chown -R 10000:10000 "$d" 2>/dev/null || true
+  done
+  exec gosu hermes "$0" "$@"
+fi
+
 mkdir -p "${CONFIG_DIR}" "${PROFILES_DIR}" "${SKILLS_DIR}"
 rm -f "${READY_FILE}"
 
