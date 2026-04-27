@@ -166,6 +166,26 @@ activate_channel "instagram" "${INSTAGRAM_ACCESS_TOKEN}"
 # =============================================================================
 # 4. Activate skills
 # =============================================================================
+# Read the per-instance skill list from Supabase if available — overrides
+# the build-time ENABLED_SKILLS env. This lets the admin change a tenant's
+# skills via the UI without re-deploying the container.
+fetch_instance_skills() {
+  if [[ -z "${SUPABASE_URL}" || -z "${SUPABASE_SERVICE_ROLE_KEY}" || -z "${INSTANCE_ID}" ]]; then
+    return 0
+  fi
+  local from_db
+  from_db=$(curl -s -m 10 \
+    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+    "${SUPABASE_URL}/rest/v1/instances?id=eq.${INSTANCE_ID}&select=enabled_skills" 2>/dev/null \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); print((d[0].get('enabled_skills') or '').strip()) if d else print('')" 2>/dev/null \
+    || echo "")
+  if [[ -n "${from_db}" ]]; then
+    log "  Using per-instance skills from DB: ${from_db}"
+    ENABLED_SKILLS="${from_db}"
+  fi
+}
+fetch_instance_skills
 log "Activating skills: ${ENABLED_SKILLS}"
 
 # Copy skill manifests from the read-only template into the writable /skills
