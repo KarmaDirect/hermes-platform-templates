@@ -32,6 +32,14 @@ services:
       # ----- Hermes auth -----
       HERMES_API_TOKEN:    ${HERMES_API_TOKEN}
 
+      # ----- Bootstrap self-healing (set by control-plane provisioner) -----
+      # The bootstrap.sh uses these to (a) self-correct `instances.api_token`
+      # if the env-injected token diverges from DB, (b) auto-apply Composio
+      # MCP config from `tenant_integrations` + `platform_settings` on boot.
+      INSTANCE_ID:                 ${INSTANCE_ID:-}
+      ORG_ID:                      ${ORG_ID:-}
+      COMPOSIO_API_KEY:            ${COMPOSIO_API_KEY:-}
+
       # ----- LLM providers -----
       ANTHROPIC_API_KEY:   ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY:      ${GEMINI_API_KEY:-}

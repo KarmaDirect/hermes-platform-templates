@@ -65,16 +65,35 @@ export RESEND_API_KEY="${RESEND_API_KEY:-}"
 export INSTAGRAM_ACCESS_TOKEN="${INSTAGRAM_ACCESS_TOKEN:-}"
 export SUPABASE_URL="${SUPABASE_URL:-}"
 export SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY:-}"
+export INSTANCE_ID="${INSTANCE_ID:-}"
+export ORG_ID="${ORG_ID:-}"
+export COMPOSIO_API_KEY="${COMPOSIO_API_KEY:-}"
 export ENABLED_SKILLS="${ENABLED_SKILLS:-reception-call,briefing-quotidien}"
 # Default LLM model — applied once at first boot if no model is set yet.
 # Stepfun via Nous Portal is free and a sane default for new tenants.
 export HERMES_DEFAULT_MODEL="${HERMES_DEFAULT_MODEL:-stepfun/step-3.5-flash}"
 
 # Boot in root: chown the volumes (created root-owned by Docker) to hermes (10000),
-# then re-exec ourselves as hermes via gosu. Once we're hermes, this block is skipped.
+# clean stale runtime files (PID/lock from a crashed prior boot), then re-exec
+# ourselves as hermes via gosu. Once we're hermes, this block is skipped.
+#
+# Why aggressive cleanup matters:
+#   The gateway writes /opt/data/gateway.pid + gateway.lock at boot. If a prior
+#   run crashed (or someone shelled into the container as root and ran hermes),
+#   these files end up owned by root or contain a stale PID — and the next boot
+#   as user hermes can't overwrite them, so gateway crashes with PermissionError
+#   and the container is wedged. We aggressively clean before re-exec'ing.
 if [[ "$(id -u)" == "0" ]]; then
   for d in "${DATA_DIR}" "${PROFILES_DIR}" "${SKILLS_DIR}"; do
-    [[ -d "$d" ]] && chown -R 10000:10000 "$d" 2>/dev/null || true
+    if [[ -d "$d" ]]; then
+      chown -R 10000:10000 "$d" 2>/dev/null || true
+    fi
+  done
+  # Remove stale runtime files left over from prior crashes / root invocations.
+  # The hermes user re-creates them at startup, no data lost.
+  for f in "${DATA_DIR}/gateway.pid" "${DATA_DIR}/gateway.lock" \
+           "${DATA_DIR}/gateway_state.json" "${DATA_DIR}/auth.lock"; do
+    [[ -f "$f" ]] && rm -f "$f" 2>/dev/null || true
   done
   exec gosu hermes "$0" "$@"
 fi
@@ -170,6 +189,107 @@ for raw in "${SKILL_LIST[@]}"; do
       || warn "    failed to enable skill ${skill} (continuing)"
   fi
 done
+
+# =============================================================================
+# 4.5. Self-heal `instances.api_token` in Supabase platform DB
+# =============================================================================
+# Why: at provision time, the control-plane generates HERMES_API_TOKEN, injects
+# it into Coolify env AND writes it to `instances.api_token`. But if anyone
+# rotates the env (or a manual edit diverges them), the proxy ends up using
+# the DB token while the gateway accepts the env one → 401 on every chat call.
+# We push the env token to DB on every boot so they stay in sync.
+sync_token_to_db() {
+  if [[ -z "${SUPABASE_URL}" || -z "${SUPABASE_SERVICE_ROLE_KEY}" || -z "${INSTANCE_ID}" ]]; then
+    log "  Skip (missing SUPABASE_URL / SERVICE_ROLE / INSTANCE_ID)"
+    return 0
+  fi
+  local resp
+  resp=$(curl -s -m 10 -o /dev/null -w '%{http_code}' \
+    -X PATCH \
+    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+    -H "Content-Type: application/json" \
+    -H "Prefer: return=minimal" \
+    -d "{\"api_token\":\"${HERMES_API_TOKEN}\"}" \
+    "${SUPABASE_URL}/rest/v1/instances?id=eq.${INSTANCE_ID}" 2>/dev/null || echo "000")
+  if [[ "${resp}" =~ ^2 ]]; then
+    log "  → Supabase instances.api_token synced (HTTP ${resp})"
+  else
+    warn "  → Supabase PATCH returned HTTP ${resp} (proxy may 401 until manual sync)"
+  fi
+}
+log "Syncing api_token to Supabase platform DB"
+sync_token_to_db
+
+# =============================================================================
+# 4.6. Re-apply Composio MCP config (from tenant_integrations + platform_settings)
+# =============================================================================
+# Why: Composio MCP url + headers can change (admin rotates the multi-toolkit
+# server, COMPOSIO_API_KEY rotates). The Edge Function `composio-webhook` only
+# pushes config when an OAuth flow finishes — but a redeploy resets the
+# container's /opt/data/config.yaml, so the MCP server stops being announced.
+# We re-read from Supabase on every boot and patch config.yaml idempotently.
+apply_composio_mcp() {
+  if [[ -z "${SUPABASE_URL}" || -z "${SUPABASE_SERVICE_ROLE_KEY}" || -z "${ORG_ID}" || -z "${COMPOSIO_API_KEY}" ]]; then
+    log "  Skip (missing Supabase creds, ORG_ID, or COMPOSIO_API_KEY)"
+    return 0
+  fi
+
+  # Does this org have any active Composio integration ?
+  local active_count
+  active_count=$(curl -s -m 10 \
+    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+    "${SUPABASE_URL}/rest/v1/tenant_integrations?org_id=eq.${ORG_ID}&backend=eq.composio&status=eq.active&select=id" 2>/dev/null \
+    | grep -oE '"id":' | wc -l || echo "0")
+  if [[ "${active_count}" -lt 1 ]]; then
+    log "  No active Composio integration for org=${ORG_ID} — skipping"
+    return 0
+  fi
+
+  # Read MCP base URL from platform_settings
+  local mcp_url
+  mcp_url=$(curl -s -m 10 \
+    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+    "${SUPABASE_URL}/rest/v1/platform_settings?key=eq.composio_mcp_url&select=value" 2>/dev/null \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['value'] if d else '')" 2>/dev/null \
+    || echo "")
+  if [[ -z "${mcp_url}" ]]; then
+    warn "  composio_mcp_url not set in platform_settings"
+    return 0
+  fi
+
+  # Build full URL with user_id query param (= org_id, the value passed to
+  # Composio when the tenant connected an account).
+  local full_url
+  if [[ "${mcp_url}" == *"?"* ]]; then
+    full_url="${mcp_url}&user_id=${ORG_ID}"
+  else
+    full_url="${mcp_url}?user_id=${ORG_ID}"
+  fi
+
+  log "  Patching /opt/data/config.yaml with Composio MCP server"
+  "${HERMES_BIN%/hermes}/python" - <<PY || warn "  Python patch failed"
+import yaml, sys
+path = "/opt/data/config.yaml"
+try:
+    with open(path) as f:
+        cfg = yaml.safe_load(f) or {}
+except FileNotFoundError:
+    cfg = {}
+cfg.setdefault("mcp_servers", {})["composio"] = {
+    "url": "${full_url}",
+    "auth_type": "header",
+    "headers": {"x-api-key": "${COMPOSIO_API_KEY}"},
+}
+with open(path, "w") as f:
+    yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+print("OK")
+PY
+}
+log "Re-applying Composio MCP config from Supabase"
+apply_composio_mcp
 
 # =============================================================================
 # 5. Start dashboard + gateway side-by-side
