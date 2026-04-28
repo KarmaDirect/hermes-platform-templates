@@ -72,6 +72,7 @@ export ENABLED_SKILLS="${ENABLED_SKILLS:-reception-call,briefing-quotidien}"
 # Default LLM model — applied once at first boot if no model is set yet.
 # Stepfun via Nous Portal is free and a sane default for new tenants.
 export HERMES_DEFAULT_MODEL="${HERMES_DEFAULT_MODEL:-stepfun/step-3.5-flash}"
+export CONTACT_EMAIL="${CONTACT_EMAIL:-non-renseigné}"
 
 # Boot in root: chown the volumes (created root-owned by Docker) to hermes (10000),
 # clean stale runtime files (PID/lock from a crashed prior boot), then re-exec
@@ -118,6 +119,10 @@ render_tpl() {
 
 render_tpl "${TEMPLATE_DIR}/config/hermes.yaml.tpl"   "${CONFIG_DIR}/hermes.yaml"
 render_tpl "${TEMPLATE_DIR}/config/channels.yaml.tpl" "${CONFIG_DIR}/channels.yaml"
+# AGENTS.md = "Context File" Hermès qui rend l'agent self-aware du dashboard.
+# Lu par prompt_builder.build_context_files_prompt(cwd=TERMINAL_CWD) à chaque
+# conversation. TERMINAL_CWD est exporté avant le launch gateway/dashboard.
+render_tpl "${TEMPLATE_DIR}/config/AGENTS.md.tpl"     "${DATA_DIR}/AGENTS.md"
 
 # =============================================================================
 # 2. Initialize Hermes profile (first boot only)
@@ -335,16 +340,21 @@ shutdown() {
 trap shutdown TERM INT
 
 log "Starting Hermes gateway (port ${GATEWAY_PORT})"
+# TERMINAL_CWD pointe sur DATA_DIR pour que prompt_builder lise AGENTS.md
+# rendu en étape 1. Sans ça, la cwd serait `/` (racine container) et l'agent
+# ignorerait toute la carte du dashboard.
 API_SERVER_HOST="${GATEWAY_HOST}" \
   API_SERVER_PORT="${GATEWAY_PORT}" \
   API_SERVER_KEY="${HERMES_API_TOKEN}" \
+  TERMINAL_CWD="${DATA_DIR}" \
   "${HERMES_BIN}" gateway run --replace \
   > "${DATA_DIR}/gateway.log" 2>&1 &
 GW_PID=$!
 log "  gateway PID=${GW_PID}"
 
 log "Starting Hermes dashboard (port ${DASHBOARD_PORT})"
-"${HERMES_BIN}" dashboard \
+TERMINAL_CWD="${DATA_DIR}" \
+  "${HERMES_BIN}" dashboard \
   --host "${DASHBOARD_HOST}" \
   --port "${DASHBOARD_PORT}" \
   --no-open \
