@@ -126,13 +126,15 @@ PROFILE_PATH="${PROFILES_DIR}/${CLIENT_SLUG}"
 if [[ ! -d "${PROFILE_PATH}" ]]; then
   log "Initializing Hermes profile: ${CLIENT_SLUG}"
   if [[ -x "${HERMES_BIN}" ]]; then
-    "${HERMES_BIN}" profile init "${CLIENT_SLUG}" --path "${PROFILE_PATH}" \
+    # The CLI command is `hermes profile create` (the older docs called it
+    # `init`, which the binary no longer supports as of v0.10.x).
+    "${HERMES_BIN}" profile create "${CLIENT_SLUG}" --path "${PROFILE_PATH}" \
       --display-name "${CLIENT_NAME}" \
       --vertical "${CLIENT_VERTICAL}" \
       --tone "${CLIENT_TONE}" \
-      || warn "hermes profile init returned non-zero (continuing — may already exist)"
+      || warn "hermes profile create returned non-zero (continuing — may already exist)"
   else
-    warn "Hermes binary not found at ${HERMES_BIN} — skipping profile init"
+    warn "Hermes binary not found at ${HERMES_BIN} — skipping profile create"
     mkdir -p "${PROFILE_PATH}"
   fi
 else
@@ -255,14 +257,17 @@ apply_composio_mcp() {
     return 0
   fi
 
-  # Does this org have any active Composio integration ?
+  # Does this org have any active Composio integration ? `wc -l` outputs
+  # whitespace-padded counts on some BSD-flavours, and the `|| echo 0` adds
+  # a second number if the curl pipe fails — strip both to a clean integer.
   local active_count
   active_count=$(curl -s -m 10 \
     -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
     -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
     "${SUPABASE_URL}/rest/v1/tenant_integrations?org_id=eq.${ORG_ID}&backend=eq.composio&status=eq.active&select=id" 2>/dev/null \
-    | grep -oE '"id":' | wc -l || echo "0")
-  if [[ "${active_count}" -lt 1 ]]; then
+    | grep -oE '"id":' | wc -l 2>/dev/null || echo 0)
+  active_count=$(echo "${active_count}" | tr -d ' \n' | head -c 6)
+  if [[ -z "${active_count}" ]] || [[ "${active_count}" == "0" ]]; then
     log "  No active Composio integration for org=${ORG_ID} — skipping"
     return 0
   fi
