@@ -58,6 +58,18 @@ RUN set -eux; \
       apk add --no-cache gettext curl ca-certificates tini; \
     fi
 
+# Sprint 3.1 — RTK plugin pour Hermès : compresse stdout shell de 60-90%.
+# Le plugin Python `rtk-hermes` intercepte les appels au tool `terminal` et
+# délègue à `rtk rewrite` pour optimiser. Source : ogallotti/rtk-hermes.
+# Cf. memory:reference_hermes_repos_findings.md Sprint 3.
+RUN set -eux; \
+    curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh || true; \
+    if [ -x /opt/hermes/.venv/bin/python ]; then \
+      /opt/hermes/.venv/bin/python -m ensurepip --upgrade 2>/dev/null || true; \
+      /opt/hermes/.venv/bin/python -m pip install --no-cache-dir rtk-hermes 2>/dev/null \
+        || echo "[build] rtk-hermes pip install skipped (pip absent or install failed) — install at runtime"; \
+    fi
+
 # Pre-create the directory layout the runtime expects.
 # /opt/hermes-template = pristine read-only assets shipped in the image.
 # /data, /skills, /profiles = mounted volumes (writable, persisted).
