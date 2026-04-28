@@ -411,11 +411,14 @@ log "Bootstrap complete — dashboard + gateway running"
 # =============================================================================
 # 7. Wait for either child to die — propagate exit code
 # =============================================================================
-# `wait -n` returns when the FIRST child exits, with that child's exit code.
-# We then trigger shutdown() to stop the surviving sibling and exit cleanly.
+# `wait -n PID...` waits for one of the SPECIFIC children to exit. Without
+# the PID list, `wait -n` would also catch the `apply_default_model`
+# background task (which is supposed to exit quickly after seeding the
+# config) and shut the container down. We only care about the long-running
+# servers : gateway + dashboard.
 set +e
-wait -n
+wait -n "${GW_PID}" "${DASH_PID}"
 EXIT_CODE=$?
 set -e
-warn "A child process exited with code ${EXIT_CODE} — shutting down sibling"
+warn "A long-running server exited with code ${EXIT_CODE} — shutting down sibling"
 shutdown
