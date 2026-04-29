@@ -322,6 +322,116 @@ log "Re-applying Composio MCP config from Supabase"
 apply_composio_mcp
 
 # =============================================================================
+# 4.7. Apply canonical Hermes config (Sprint 4 — perf + sécurité multi-tenant)
+# =============================================================================
+# Why : `hermes` reads /opt/data/config.yaml at boot. We want every tenant
+# container to start with the canonical optimizations baked in :
+#   - agent.service_tier=priority         (latency p50/p99)
+#   - prompt_caching enabled               (~60% cache hit observed)
+#   - compression.auto.at_tokens=48000     (avoid mid-session blowup)
+#   - delegation.max_iterations=12         (subagents quota — was default 50)
+#   - smart_model_routing.enabled=true     (cheap model for short queries)
+#   - security.website_blocklist enabled   (anti-SSRF, blocks cloud metadata IPs)
+#   - approvals.mode=manual + timeout 600  (partner no-code safety)
+#
+# Strategy : we merge canonical into existing /opt/data/config.yaml so that
+# Composio MCP (set by step 4.6) AND admin overrides via UI survive.
+# Structural keys (agent, security, prompt_caching, etc.) are forced canonical
+# at every boot; mcp_servers + model are preserved.
+apply_canonical_config() {
+  log "Writing canonical Hermes config to /opt/data/config.yaml"
+  "${HERMES_BIN%/hermes}/python" - <<PY || warn "  Canonical config patch failed"
+import yaml
+path = "/opt/data/config.yaml"
+try:
+    with open(path) as f:
+        existing = yaml.safe_load(f) or {}
+except FileNotFoundError:
+    existing = {}
+
+CANONICAL = {
+    "agent": {
+        "max_turns": 90,
+        "service_tier": "priority",
+        "tool_use_enforcement": "auto",
+        "gateway_timeout": 1800,
+        "gateway_timeout_warning": 900,
+        "gateway_notify_interval": 600,
+        "restart_drain_timeout": 60,
+    },
+    "prompt_caching": {
+        "enabled": True,
+        "cache_system_prompt": True,
+        "cache_skills": True,
+        "cache_memory_digest": True,
+        "min_cache_tokens": 1024,
+    },
+    "compression": {
+        "enabled": True,
+        "threshold": 0.5,
+        "target_ratio": 0.2,
+        "protect_last_n": 20,
+        "auto": {
+            "enabled": True,
+            "at_tokens": 48000,
+            "preserve": {"last_n_turns": 10},
+        },
+    },
+    "delegation": {"max_iterations": 12},
+    "smart_model_routing": {
+        "enabled": True,
+        "max_simple_chars": 160,
+        "max_simple_words": 28,
+    },
+    "approvals": {"mode": "manual", "timeout": 600},
+    "security": {
+        "redact_secrets": True,
+        "tirith_enabled": True,
+        "tirith_path": "tirith",
+        "tirith_timeout": 5,
+        "tirith_fail_open": True,
+        "website_blocklist": {
+            "enabled": True,
+            "domains": [
+                "169.254.169.254",
+                "metadata.google.internal",
+                "metadata.azure.com",
+                "100.100.100.200",
+                "metadata.tencentyun.com",
+            ],
+        },
+    },
+    "memory": {
+        "memory_enabled": True,
+        "user_profile_enabled": True,
+        "memory_char_limit": 2200,
+        "user_char_limit": 1375,
+    },
+    "logging": {"level": "INFO", "max_size_mb": 5, "backup_count": 3},
+}
+
+# Structural override (canonical wins) — these keys are reset to canonical at every boot.
+# This guarantees every tenant container has the latest perf+security settings,
+# even after a config drift via UI.
+result = dict(existing)
+for k, v in CANONICAL.items():
+    result[k] = v
+
+# Preserve model from existing (apply_default_model or admin UI). Fallback to env default.
+if not result.get("model"):
+    result["model"] = "${HERMES_DEFAULT_MODEL}"
+
+# Preserve mcp_servers (Composio set in step 4.6, plus any tenant additions).
+# Already in result if existing had it — no action needed.
+
+with open(path, "w") as f:
+    yaml.safe_dump(result, f, default_flow_style=False, sort_keys=False)
+print("OK: canonical config written, %d top-level keys" % len(result))
+PY
+}
+apply_canonical_config
+
+# =============================================================================
 # 5. Start dashboard + gateway side-by-side
 # =============================================================================
 touch "${INIT_MARKER}"
@@ -363,60 +473,10 @@ TERMINAL_CWD="${DATA_DIR}" \
 DASH_PID=$!
 log "  dashboard PID=${DASH_PID}"
 
-# =============================================================================
-# 6. Apply default model (best-effort, runs once dashboard is ready)
-# =============================================================================
-apply_default_model() {
-  # Wait for dashboard's index.html to be served (max 30s)
-  local max=30
-  for i in $(seq 1 "${max}"); do
-    if curl -fs -m 2 "http://127.0.0.1:${DASHBOARD_PORT}/" > /dev/null 2>&1; then
-      break
-    fi
-    sleep 1
-  done
-
-  # Check current model. If empty AND HERMES_DEFAULT_MODEL is set, apply it.
-  local session_token
-  session_token=$(curl -s -m 5 "http://127.0.0.1:${DASHBOARD_PORT}/" \
-    | grep -oP '__HERMES_SESSION_TOKEN__\s*=\s*"\K[^"]+' \
-    | head -1)
-  if [[ -z "${session_token}" ]]; then
-    warn "Could not scrape SESSION_TOKEN from dashboard — skipping default model setup"
-    return 0
-  fi
-
-  local current_model
-  current_model=$(curl -fs -m 5 \
-    -H "Authorization: Bearer ${session_token}" \
-    "http://127.0.0.1:${DASHBOARD_PORT}/api/config" \
-    | grep -oP '"model"\s*:\s*"\K[^"]*' \
-    | head -1)
-
-  if [[ -n "${current_model}" ]]; then
-    log "Default model already set (${current_model}) — leaving as-is"
-    return 0
-  fi
-
-  if [[ -z "${HERMES_DEFAULT_MODEL}" ]]; then
-    log "No HERMES_DEFAULT_MODEL configured — skipping"
-    return 0
-  fi
-
-  log "Applying default model: ${HERMES_DEFAULT_MODEL}"
-  if curl -fs -m 5 -X PUT \
-       -H "Authorization: Bearer ${session_token}" \
-       -H "Content-Type: application/json" \
-       -d "{\"config\":{\"model\":\"${HERMES_DEFAULT_MODEL}\"}}" \
-       "http://127.0.0.1:${DASHBOARD_PORT}/api/config" > /dev/null 2>&1; then
-    log "  → model applied"
-  else
-    warn "  → PUT /api/config failed (admin can set it manually via UI)"
-  fi
-}
-( apply_default_model ) &
-
 log "Bootstrap complete — dashboard + gateway running"
+# Note: apply_default_model removed (Sprint 4) — replaced by apply_canonical_config
+# in step 4.7 which writes /opt/data/config.yaml directly (avoids buggy
+# PUT /api/config that resets unspecified fields to defaults).
 
 # =============================================================================
 # 7. Wait for either child to die — propagate exit code
