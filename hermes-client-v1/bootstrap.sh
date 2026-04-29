@@ -123,6 +123,9 @@ render_tpl "${TEMPLATE_DIR}/config/channels.yaml.tpl" "${CONFIG_DIR}/channels.ya
 # Lu par prompt_builder.build_context_files_prompt(cwd=TERMINAL_CWD) à chaque
 # conversation. TERMINAL_CWD est exporté avant le launch gateway/dashboard.
 render_tpl "${TEMPLATE_DIR}/config/AGENTS.md.tpl"     "${DATA_DIR}/AGENTS.md"
+# Sprint 6.A1 — SOUL.md custom par tenant. Hermès le lit au boot pour façonner
+# la voix de l'agent (par niche métier + ton choisi au provisioning).
+render_tpl "${TEMPLATE_DIR}/config/SOUL.md.tpl"       "${DATA_DIR}/SOUL.md"
 
 # =============================================================================
 # 2. Initialize Hermes profile (first boot only)
