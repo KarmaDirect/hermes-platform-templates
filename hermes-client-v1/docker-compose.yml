@@ -14,10 +14,8 @@
 services:
   hermes:
     container_name: hermes-${CLIENT_SLUG:-unknown}
-    image: hermes-client:${HERMES_TEMPLATE_VERSION:-v1}
-    build:
-      context: .
-      dockerfile: Dockerfile.hermes
+    image: ghcr.io/karmadirect/hermes-client:${HERMES_TEMPLATE_VERSION:-v1}
+    pull_policy: missing
     restart: unless-stopped
     # No host-port mapping : Traefik routes via the `coolify` Docker network
     # (label below points at port 9119 inside the container), and the
