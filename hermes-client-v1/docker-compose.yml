@@ -81,6 +81,19 @@ services:
       traefik.enable: "true"
       traefik.docker.network: "coolify"
       traefik.http.services.hermes.loadbalancer.server.port: "9119"
+      # Custom domain auto : <slug>.hermes-platform.com
+      # Prerequisite: DNS wildcard `*.hermes-platform.com -> 51.75.24.107` set
+      # at the registrar. Coolify also auto-creates a fallback `<uuid>.sslip.io`
+      # router so the tenant is reachable even before DNS propagates.
+      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.rule: "Host(`${CLIENT_SLUG:-unknown}.hermes-platform.com`)"
+      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.entrypoints: "https"
+      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.tls: "true"
+      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.tls.certresolver: "letsencrypt"
+      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.service: "hermes"
+      # HTTP -> HTTPS redirect
+      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-http.rule: "Host(`${CLIENT_SLUG:-unknown}.hermes-platform.com`)"
+      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-http.entrypoints: "http"
+      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-http.middlewares: "redirect-to-https@internal"
     networks:
       - default
       - coolify
