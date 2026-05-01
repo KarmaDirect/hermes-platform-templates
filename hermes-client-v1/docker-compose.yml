@@ -41,19 +41,27 @@ services:
       COMPOSIO_API_KEY:            ${COMPOSIO_API_KEY:-}
 
       # ----- LLM providers -----
+      # Source primaire = Nous Portal (StepFun-3.5 gratuit, 300+ modèles avec abonnement)
+      # device_code OAuth, géré par Hermès agent natif au boot
+      NOUS_DEFAULT_MODEL:  ${NOUS_DEFAULT_MODEL:-stepfun/step-3.5-flash}
+      # Fallback / transition courte : OpenRouter (Hatim a ~10€ de credits)
+      OPENROUTER_API_KEY:  ${OPENROUTER_API_KEY:-}
+      OPENROUTER_FALLBACK_MODEL: ${OPENROUTER_FALLBACK_MODEL:-deepseek/deepseek-chat-v4-flash}
+      # Optionnels (rarement utilisés)
       ANTHROPIC_API_KEY:   ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY:      ${GEMINI_API_KEY:-}
       OPENAI_API_KEY:      ${OPENAI_API_KEY:-}
 
       # ----- Channels (empty = disabled at bootstrap) -----
-      VAPI_API_KEY:           ${VAPI_API_KEY:-}
+      # Pas de Vapi — voix gérée par ElevenLabs Conversational AI côté client
       WHATSAPP_TOKEN:         ${WHATSAPP_TOKEN:-}
       TELEGRAM_BOT_TOKEN:     ${TELEGRAM_BOT_TOKEN:-}
       RESEND_API_KEY:         ${RESEND_API_KEY:-}
       INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN:-}
 
       # ----- Skill activation list -----
-      ENABLED_SKILLS:      ${ENABLED_SKILLS:-reception-call,briefing-quotidien}
+      # 4 skills MVP LLM-only — overridable par le control-plane selon vertical
+      ENABLED_SKILLS:      ${ENABLED_SKILLS:-briefing-quotidien,reception-call,devis-from-description,relance-impayes}
 
       # ----- Supabase write-back (Hermes Platform DB) -----
       SUPABASE_URL:                ${SUPABASE_URL:-}
