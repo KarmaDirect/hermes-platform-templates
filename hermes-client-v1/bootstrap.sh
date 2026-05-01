@@ -237,6 +237,19 @@ for raw in "${SKILL_LIST[@]}"; do
   fi
 done
 
+# 4.4.1. Pin MVP skills so the autonomous Curator (v0.12.0+) never archives
+# nor rewrites them. Required because the Curator runs every 7 days and may
+# prune skills it considers low-value. We pin the canonical 4.
+# The CLI was added in v0.12.0 — we tolerate failure on older images.
+log "Pinning MVP skills against Curator pruning"
+for raw in "${SKILL_LIST[@]}"; do
+  skill="$(echo "${raw}" | tr -d '[:space:]')"
+  [[ -z "${skill}" ]] && continue
+  HERMES_PROFILE="${CLIENT_SLUG}" "${HERMES_BIN}" skills pin "${skill}" 2>/dev/null \
+    && log "  - ${skill}: pinned" \
+    || log "  - ${skill}: pin skipped (CLI absent or already pinned)"
+done
+
 # =============================================================================
 # 4.5. Self-heal `instances.api_token` in Supabase platform DB
 # =============================================================================
@@ -426,6 +439,22 @@ CANONICAL = {
         "user_profile_enabled": True,
         "memory_char_limit": 2200,
         "user_char_limit": 1375,
+    },
+    # Curator + background-review fork run on FREE StepFun-3.5 (Nous Portal).
+    # Both are housekeeping loops — we don't want them eating premium tokens.
+    # cycle_days: how often the Curator wakes up to grade/prune/consolidate
+    # skills (default 7d). Pinned skills are never modified.
+    "auxiliary": {
+        "background_review": {
+            "provider": "nous-portal",
+            "model": "stepfun/step-3.5-flash",
+        },
+        "curator": {
+            "provider": "nous-portal",
+            "model": "stepfun/step-3.5-flash",
+            "enabled": True,
+            "cycle_days": 7,
+        },
     },
     "logging": {"level": "INFO", "max_size_mb": 5, "backup_count": 3},
 }

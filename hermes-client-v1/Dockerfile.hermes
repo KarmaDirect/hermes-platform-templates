@@ -7,9 +7,10 @@
 # script that renders configs from environment variables at first boot.
 #
 # Notes / TODOs:
-#   - Base image tag `nousresearch/hermes-agent:v2026.4.16` is the latest known
-#     internal release. CONFIRM with Nous before pinning in production. If the
-#     image is private, the control-plane must `docker login` before build.
+#   - Base image tag `nousresearch/hermes-agent:v2026.4.30` (= v0.12.0, "Curator"
+#     release, April 30 2026). Brings autonomous skill curation + plugin host
+#     gateway + DeepSeek V4 on Nous Portal + cold start −57%. If the image is
+#     private, the control-plane must `docker login` before build.
 #   - Default UID/GID inside the upstream image is 1000:1000 (`hermes` user).
 #     We chown our injected files to keep file ownership consistent.
 #   - Real ENTRYPOINT/CMD of the base image is unconfirmed. We override with
@@ -38,7 +39,7 @@ RUN apk add --no-cache dos2unix \
  && chmod +x /staging/bootstrap.sh
 
 # ---------- Stage 2 : runtime ----------
-FROM nousresearch/hermes-agent:v2026.4.16
+FROM nousresearch/hermes-agent:v2026.4.30
 
 # Metadata
 LABEL org.opencontainers.image.title="Hermes Client Edition v1"
