@@ -498,6 +498,19 @@ shutdown() {
 }
 trap shutdown TERM INT
 
+# Source the credentials vault so any API key the admin saved via Hermès
+# Platform's "Coffre-fort" UI is exported to Hermes Agent's environment.
+# Hermes can then use ELEVENLABS_API_KEY / TWILIO_AUTH_TOKEN / etc. from
+# its skills + shell to drive the real services. Pushed by the
+# control-plane endpoint POST /platform/credentials/push.
+if [[ -f /opt/data/.env.credentials ]]; then
+  log "Loading tenant credentials vault"
+  set -a
+  # shellcheck disable=SC1091
+  source /opt/data/.env.credentials
+  set +a
+fi
+
 log "Starting Hermes gateway (port ${GATEWAY_PORT})"
 # TERMINAL_CWD pointe sur DATA_DIR pour que prompt_builder lise AGENTS.md
 # rendu en étape 1. Sans ça, la cwd serait `/` (racine container) et l'agent
