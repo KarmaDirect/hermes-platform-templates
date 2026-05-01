@@ -239,13 +239,13 @@ done
 
 # 4.4.1. Pin MVP skills so the autonomous Curator (v0.12.0+) never archives
 # nor rewrites them. Required because the Curator runs every 7 days and may
-# prune skills it considers low-value. We pin the canonical 4.
-# The CLI was added in v0.12.0 — we tolerate failure on older images.
+# prune skills it considers low-value. The CLI is `hermes curator pin <slug>`
+# (sub-command of `curator`, NOT `skills`). Tolerated on older images.
 log "Pinning MVP skills against Curator pruning"
 for raw in "${SKILL_LIST[@]}"; do
   skill="$(echo "${raw}" | tr -d '[:space:]')"
   [[ -z "${skill}" ]] && continue
-  HERMES_PROFILE="${CLIENT_SLUG}" "${HERMES_BIN}" skills pin "${skill}" 2>/dev/null \
+  HERMES_PROFILE="${CLIENT_SLUG}" "${HERMES_BIN}" curator pin "${skill}" 2>/dev/null \
     && log "  - ${skill}: pinned" \
     || log "  - ${skill}: pin skipped (CLI absent or already pinned)"
 done
