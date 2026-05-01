@@ -213,10 +213,27 @@ for raw in "${SKILL_LIST[@]}"; do
     warn "  - ${skill}: NOT FOUND in /skills (skip)"
     continue
   fi
-  log "  - ${skill}: ENABLE"
-  if [[ -x "${HERMES_BIN}" ]]; then
-    "${HERMES_BIN}" skill enable "${skill}" --profile "${CLIENT_SLUG}" \
-      || warn "    failed to enable skill ${skill} (continuing)"
+
+  # Modern Hermes (>= 0.10) detects skills by reading SKILL.md placed under
+  # `${PROFILE_PATH}/skills/<category>/<skill_name>/SKILL.md`. We extract the
+  # category from the SKILL.md frontmatter; fallback to "custom" if missing.
+  # The legacy `hermes skill enable` CLI was removed — copying into the
+  # profile dir IS the activation.
+  category="custom"
+  if [[ -f "${SKILLS_DIR}/${skill}/SKILL.md" ]]; then
+    cat_line=$(grep -E '^\s*category:' "${SKILLS_DIR}/${skill}/SKILL.md" 2>/dev/null | head -1 | sed -E 's/.*category:[[:space:]]*//' | tr -d '"' | tr -d "'" | tr -d ' ')
+    [[ -n "${cat_line}" ]] && category="${cat_line}"
+  fi
+  target_parent="${PROFILE_PATH}/skills/${category}"
+  mkdir -p "${target_parent}"
+  if [[ ! -d "${target_parent}/${skill}" ]]; then
+    cp -r "${SKILLS_DIR}/${skill}" "${target_parent}/" 2>/dev/null \
+      && log "  - ${skill}: installed in profile/skills/${category}/" \
+      || warn "    copy ${skill} → ${target_parent}/ failed (continuing)"
+  else
+    # Idempotent : already in profile, just refresh SKILL.md so updates propagate.
+    cp -f "${SKILLS_DIR}/${skill}/SKILL.md" "${target_parent}/${skill}/SKILL.md" 2>/dev/null || true
+    log "  - ${skill}: refreshed (already in profile/skills/${category}/)"
   fi
 done
 
