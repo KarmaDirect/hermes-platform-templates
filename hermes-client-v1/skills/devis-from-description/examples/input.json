@@ -1,0 +1,8 @@
+{
+  "description": "Le client veut refaire sa terrasse en bois exotique de 30m². Le sol existant est en béton, propre. Il faudra fournir lambourdes + lames bois exotique. Pose comprise. Évacuation des déchets éventuels du chantier non comprise. Accès facile, voiture peut se garer devant.",
+  "vertical": "btp",
+  "surface_m2": 30,
+  "budget_indicatif": null,
+  "ville": "La Rochelle",
+  "contact_name": "Marc Dupont"
+}

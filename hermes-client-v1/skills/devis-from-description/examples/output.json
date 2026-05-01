@@ -1,0 +1,54 @@
+{
+  "devis": {
+    "client_name": "Marc Dupont",
+    "ville": "La Rochelle",
+    "items": [
+      {
+        "label": "Fourniture lambourdes traitées classe 4",
+        "description": "Lambourdes pin classe 4 ou équivalent, espacement 40cm",
+        "quantity": 30,
+        "unit": "m²",
+        "unit_price_estimated": null,
+        "total_estimated": null,
+        "needs_pricing": true
+      },
+      {
+        "label": "Fourniture lames bois exotique",
+        "description": "Bois exotique type Ipé/Cumaru, lames 21mm",
+        "quantity": 30,
+        "unit": "m²",
+        "unit_price_estimated": null,
+        "total_estimated": null,
+        "needs_pricing": true
+      },
+      {
+        "label": "Pose terrasse",
+        "description": "Pose lambourdes + vissage lames sur sol béton existant",
+        "quantity": 30,
+        "unit": "m²",
+        "unit_price_estimated": null,
+        "total_estimated": null,
+        "needs_pricing": true
+      }
+    ],
+    "total_ht_estimated": null,
+    "tva_rate": 20.0,
+    "total_ttc_estimated": null,
+    "validity_days": 30,
+    "delai_realisation": "3 à 5 jours après commande matériaux"
+  },
+  "hypotheses_assumed": [
+    "Sol béton existant en bon état, sec et plan — pas de reprise nécessaire",
+    "Surface confirmée 30m² par le client (à vérifier sur site avant validation devis)",
+    "TVA 20% standard appliquée — vérifier si TVA 10% rénovation logement >2 ans applicable",
+    "Accès facile confirmé par client (voiture devant)",
+    "Choix essence bois exotique laissé au patron pour l'estimation"
+  ],
+  "exclusions": [
+    "Démolition / dépose terrasse existante",
+    "Évacuation des déchets de chantier",
+    "Finitions (huile/saturateur) — à proposer en option",
+    "Plots réglables si dénivelé constaté"
+  ],
+  "ready_to_send": false
+}

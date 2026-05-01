@@ -1,0 +1,35 @@
+name: devis-from-description
+version: 1.0.0
+description: Génère un devis structuré (lignes, HT/TVA/TTC, hypothèses) à partir d'une description texte des travaux.
+author: Hermès Platform
+category: sales
+triggers:
+  - type: webhook
+    path: /devis/draft
+    method: POST
+inputs:
+  description: string
+  vertical: string?
+  surface_m2: number?
+  budget_indicatif: number?
+  ville: string?
+  contact_name: string?
+outputs:
+  devis: object
+  hypotheses_assumed: array
+  exclusions: array
+  ready_to_send: boolean
+requires:
+  channels: []
+  channels_optional: [email]
+  llm: stepfun-3.5-flash
+  llm_fallback: deepseek-v4-pro
+  data_sources_optional: [supabase.price_list]
+config:
+  prompt_system: prompts/system.md
+  prompt_user: prompts/user-template.md
+  validity_days: 30
+  default_tva: 20.0
+human_in_the_loop:
+  required: true
+  reason: "Devis = engagement commercial. Patron valide avant envoi."
