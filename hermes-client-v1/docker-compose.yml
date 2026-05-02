@@ -86,22 +86,35 @@ services:
       coolify.managed: "true"
       # ----- Traefik routing (Coolify proxy) -----
       # Container must be on the `coolify` network for Traefik DNS resolution.
+      #
+      # WHY everything is namespaced by COOLIFY_RESOURCE_UUID (do not regress):
+      # The previous version used `${CLIENT_SLUG}` AND a static service name
+      # `hermes`. CLIENT_SLUG is defined in the service's `environment:`,
+      # NOT in Coolify's shell render-time scope, so labels containing
+      # `${CLIENT_SLUG}` were emitted with the literal placeholder text.
+      # Worse, every tenant container declared the same `traefik.http.services.hermes`
+      # service — Traefik treated all running tenants as backends of one
+      # shared pool and load-balanced requests round-robin between them.
+      # A request to tenant A's URL would then 50% of the time hit tenant
+      # B's container, leaking SESSION_TOKEN and session lists across
+      # tenants and breaking chat persistence in the dashboard UI.
+      #
+      # COOLIFY_RESOURCE_UUID *is* injected by Coolify at compose-render
+      # time (always unique per app), and SERVICE_FQDN_HERMES carries the
+      # FQDN configured for this app — both are reliable substitutions.
       traefik.enable: "true"
       traefik.docker.network: "coolify"
-      traefik.http.services.hermes.loadbalancer.server.port: "9119"
-      # Custom domain auto : <slug>-hermes.webstate.pro
-      # The `*.webstate.pro` wildcard A-record already points to 51.75.24.107.
-      # Coolify also auto-creates a fallback `<uuid>.sslip.io` router so the
-      # tenant is reachable even before TLS resolves.
-      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.rule: "Host(`${CLIENT_SLUG:-unknown}-hermes.webstate.pro`)"
-      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.entrypoints: "https"
-      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.tls: "true"
-      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.tls.certresolver: "letsencrypt"
-      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-https.service: "hermes"
+      traefik.http.services.hermes-${COOLIFY_RESOURCE_UUID:-singleton}.loadbalancer.server.port: "9119"
+      # HTTPS router — uses the FQDN Coolify configured for this app.
+      traefik.http.routers.hermes-${COOLIFY_RESOURCE_UUID:-singleton}-https.rule: "Host(`${SERVICE_FQDN_HERMES}`)"
+      traefik.http.routers.hermes-${COOLIFY_RESOURCE_UUID:-singleton}-https.entrypoints: "https"
+      traefik.http.routers.hermes-${COOLIFY_RESOURCE_UUID:-singleton}-https.tls: "true"
+      traefik.http.routers.hermes-${COOLIFY_RESOURCE_UUID:-singleton}-https.tls.certresolver: "letsencrypt"
+      traefik.http.routers.hermes-${COOLIFY_RESOURCE_UUID:-singleton}-https.service: "hermes-${COOLIFY_RESOURCE_UUID:-singleton}"
       # HTTP -> HTTPS redirect
-      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-http.rule: "Host(`${CLIENT_SLUG:-unknown}-hermes.webstate.pro`)"
-      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-http.entrypoints: "http"
-      traefik.http.routers.hermes-${CLIENT_SLUG:-unknown}-http.middlewares: "redirect-to-https@internal"
+      traefik.http.routers.hermes-${COOLIFY_RESOURCE_UUID:-singleton}-http.rule: "Host(`${SERVICE_FQDN_HERMES}`)"
+      traefik.http.routers.hermes-${COOLIFY_RESOURCE_UUID:-singleton}-http.entrypoints: "http"
+      traefik.http.routers.hermes-${COOLIFY_RESOURCE_UUID:-singleton}-http.middlewares: "redirect-to-https@internal"
     networks:
       - default
       - coolify
