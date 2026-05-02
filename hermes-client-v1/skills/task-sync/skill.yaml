@@ -1,0 +1,18 @@
+name: task-sync
+version: 1.0.0
+description: Persiste une tâche dans Supabase tenant_tasks pour qu'elle soit visible dans /tasks du dashboard.
+author: Hermès Platform
+category: productivity
+triggers:
+  - type: manual
+inputs:
+  content: string
+  priority: string?
+  due_date: string?
+outputs:
+  task_id: string
+  success: boolean
+requires:
+  data_sources: [supabase.tenant_tasks]
+human_in_the_loop:
+  required: false

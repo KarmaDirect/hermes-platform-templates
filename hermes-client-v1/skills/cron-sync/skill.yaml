@@ -1,0 +1,20 @@
+name: cron-sync
+version: 1.0.0
+description: Persiste un cron dans Supabase tenant_crons pour qu'il soit visible et géré dans /cron du dashboard.
+author: Hermès Platform
+category: productivity
+triggers:
+  - type: manual
+inputs:
+  name: string
+  schedule: string
+  instruction: string
+  agent_id: string?
+  skill_id: string?
+outputs:
+  cron_id: string
+  success: boolean
+requires:
+  data_sources: [supabase.tenant_crons]
+human_in_the_loop:
+  required: false

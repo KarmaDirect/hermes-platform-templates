@@ -1,0 +1,14 @@
+name: integration-list
+version: 1.0.0
+description: Liste les intégrations Composio actuellement connectées en lisant Supabase tenant_integrations.
+author: Hermès Platform
+category: productivity
+triggers:
+  - type: manual
+inputs: {}
+outputs:
+  connected: array
+requires:
+  data_sources: [supabase.tenant_integrations]
+human_in_the_loop:
+  required: false
