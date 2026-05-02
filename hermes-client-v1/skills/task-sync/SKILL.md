@@ -1,7 +1,7 @@
 ---
 name: task-sync
-description: Persiste une tâche dans Supabase tenant_tasks (la table que la page /tasks du dashboard affiche). À appeler après le tool natif `todo` pour que la tâche soit visible côté UI.
-version: 1.0.1
+description: Persiste une tâche dans Supabase tenant_tasks (la table que la page /tasks du dashboard affiche). Utilise ce skill au lieu du tool natif `todo` désactivé pour ce profil — c'est le seul moyen pour que la tâche soit visible et éditable dans l'UI.
+version: 2.0.0
 author: Hermès Platform
 license: MIT
 dependencies: []
@@ -16,9 +16,7 @@ metadata:
 
 ## When to Use
 
-Le tool natif `todo` Hermès écrit dans un store local — la page `/tasks` du dashboard ne le voit pas (elle lit la table Supabase `tenant_tasks`). Ce skill comble ce silo : appelle d'abord `todo(action="add", ...)` puis ce skill pour rendre la tâche visible dans l'UI.
-
-Trigger : utilisateur dit « ajoute une tâche », « rappelle-moi de... », « note qu'on doit faire X ».
+Utilisateur dit « ajoute une tâche », « rappelle-moi de... », « note qu'on doit faire X ». Tu dois **toujours** passer par ce skill (le tool natif `todo` est désactivé sur cette interface chat).
 
 ## Quick Reference
 
@@ -32,44 +30,59 @@ Trigger : utilisateur dit « ajoute une tâche », « rappelle-moi de... », « 
 }
 ```
 
-**Output** : `{"success": true, "task_id": "uuid"}` ou erreur explicite.
+**Output** : `{"success": true, "task_id": "uuid"}`.
 
 ## Procedure
 
-1. Variables d'env (déjà injectées dans le container) :
-   - `SUPABASE_URL` (ex: `http://supabase-kong:8000`)
-   - `SUPABASE_SERVICE_ROLE_KEY` (JWT service_role, full access)
-   - `ORG_ID` (UUID de l'organisation tenant)
+**Une seule étape** : appelle `execute_code` avec ce script Python (modifie `TITLE`, `PRIORITY`, `COLUMN`, `DUE_DATE`).
 
-2. Appelle `terminal` avec ce shell (échappe correctement le titre) :
+```python
+import os, json, urllib.request, urllib.error
 
-```bash
-TITLE=$(jq -Rs . <<< "<titre tâche>")
-curl -sS -X POST "${SUPABASE_URL}/rest/v1/tenant_tasks" \
-  -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-  -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
-  -H "Content-Type: application/json" \
-  -H "Prefer: return=representation" \
-  -d "{
-    \"org_id\": \"${ORG_ID}\",
-    \"title\": ${TITLE},
-    \"column_name\": \"todo\",
-    \"priority\": \"medium\"
-  }"
+TITLE      = "Appeler le client Dupont pour le devis salle de bain"
+PRIORITY   = "medium"     # "low" | "medium" | "high"
+COLUMN     = "todo"       # "backlog" | "todo" | "in_progress" | "review" | "done"
+DUE_DATE   = None         # ISO 8601 string ou None
+
+url = f"{os.environ['SUPABASE_URL']}/rest/v1/tenant_tasks"
+key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
+org = os.environ['ORG_ID']
+
+body = {
+    "org_id": org,
+    "title": TITLE,
+    "column_name": COLUMN,
+    "priority": PRIORITY,
+}
+if DUE_DATE:
+    body["due_date"] = DUE_DATE
+
+req = urllib.request.Request(
+    url,
+    data=json.dumps(body).encode("utf-8"),
+    headers={
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    },
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=10) as r:
+        resp = json.loads(r.read().decode())
+        print("OK", json.dumps(resp[0] if isinstance(resp, list) else resp, ensure_ascii=False))
+except urllib.error.HTTPError as e:
+    print("ERR", e.code, e.read().decode()[:300])
 ```
 
-3. Valeurs valides (sinon CHECK constraint rejette) :
-   - `column_name` : `backlog` | `todo` | `in_progress` | `review` | `done`
-   - `priority` : `high` | `medium` | `low`
+## Format de réponse à l'utilisateur
 
-4. Parse la réponse JSON pour récupérer `id`. Renvoie `{"success": true, "task_id": "<id>"}`.
+```
+✅ Tâche ajoutée : « <title> »
+Priorité : <priority>. Visible dans /tasks.
 
-5. En cas d'erreur HTTP :
-   - 401/403 : `SUPABASE_SERVICE_ROLE_KEY` absent → vérifier env du container.
-   - 404 : table absente — n'invente pas, prévenir l'utilisateur.
-   - 400 : check les contraintes column_name/priority ci-dessus.
+[[goto:/tasks|Voir mes tâches]]
+```
 
-## Style
-
-- Confirme à l'utilisateur en 1 phrase : « Tâche ajoutée à ta liste. Visible dans /tasks. »
-- En cas d'erreur, résume « pas pu enregistrer côté dashboard, mais c'est dans ta todo locale » et propose `[[goto:/tasks|Voir mes tâches]]`.
+En cas d'erreur, dis « pas pu enregistrer côté dashboard, raison : <courte> » sans stack.

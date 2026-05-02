@@ -1,7 +1,7 @@
 ---
 name: cron-sync
-description: Persiste un cron dans Supabase tenant_crons (la table que la page /cron du dashboard affiche). À appeler au lieu (ou en plus) du tool natif `cronjob` quand l'utilisateur veut que le cron soit visible et géré dans l'UI.
-version: 1.0.0
+description: Persiste un cron dans Supabase tenant_crons (la table que la page /cron du dashboard affiche). Utilise ce skill au lieu du tool natif `cronjob` désactivé pour ce profil — c'est le seul moyen pour que le cron soit visible et géré dans l'UI.
+version: 2.0.0
 author: Hermès Platform
 license: MIT
 dependencies: []
@@ -16,9 +16,7 @@ metadata:
 
 ## When to Use
 
-Le tool natif `cronjob` Hermès enregistre dans le store interne du container — la page `/cron` du dashboard ne le voit pas (elle lit `tenant_crons` Supabase). Ce skill comble le silo : appelle-le quand l'utilisateur dit « crée un cron », « planifie », « tous les matins », « chaque lundi ».
-
-Tu peux soit (a) appeler `cron-sync` directement, soit (b) appeler `cronjob` puis `cron-sync` en doublon — option (a) suffit pour 95% des cas.
+Utilisateur dit « crée un cron », « planifie », « tous les matins », « chaque lundi », « toutes les X minutes ». Tu dois **toujours** passer par ce skill (le tool natif `cronjob` est désactivé sur cette interface chat).
 
 ## Quick Reference
 
@@ -27,8 +25,8 @@ Tu peux soit (a) appeler `cron-sync` directement, soit (b) appeler `cronjob` pui
 {
   "name": "recap_matin_8h",
   "schedule": "0 8 * * *",
-  "instruction": "Fais-moi un récap matinal : emails non lus, tâches en cours, RDV du jour.",
-  "agent_id": "lea-secretaire",
+  "instruction": "Fais-moi un récap matinal : météo La Rochelle, tâches du jour, emails non lus.",
+  "agent_id": null,
   "skill_id": "briefing-quotidien"
 }
 ```
@@ -37,53 +35,66 @@ Tu peux soit (a) appeler `cron-sync` directement, soit (b) appeler `cronjob` pui
 
 ## Procedure
 
-1. Variables d'env (déjà injectées) :
-   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ORG_ID`
+**Une seule étape** : appelle `execute_code` avec ce script Python (modifie `NAME`, `SCHEDULE`, `INSTRUCTION`, `AGENT_ID`, `SKILL_ID` selon la demande utilisateur). Tout est en Python stdlib, pas besoin de `jq` ni de `curl`.
 
-2. Convertis la requête utilisateur en cron expression standard 5-fields :
-   - « tous les matins à 8h » → `0 8 * * *`
-   - « chaque lundi à 9h » → `0 9 * * 1`
-   - « toutes les 30 minutes » → `*/30 * * * *`
-   - « tous les jours ouvrés à 10h » → `0 10 * * 1-5`
-   - Si flou, demande précision avant d'appeler le skill.
+```python
+import os, json, urllib.request, urllib.error
 
-3. Requête HTTP via `terminal` :
+NAME        = "recap_matin_8h"          # snake_case court
+SCHEDULE    = "0 8 * * *"               # 5 fields cron expr
+INSTRUCTION = "Fais-moi un récap matinal : météo La Rochelle, tâches du jour, emails non lus."
+AGENT_ID    = None                      # ex: "lea-secretaire" ou None
+SKILL_ID    = None                      # ex: "briefing-quotidien" ou None
 
-```bash
-NAME=$(jq -Rs . <<< "<nom court snake_case>")
-INSTRUCTION=$(jq -Rs . <<< "<prompt complet pour l agent au moment du run>")
-curl -sS -X POST "${SUPABASE_URL}/rest/v1/tenant_crons" \
-  -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-  -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
-  -H "Content-Type: application/json" \
-  -H "Prefer: return=representation" \
-  -d "{
-    \"org_id\": \"${ORG_ID}\",
-    \"name\": ${NAME},
-    \"schedule\": \"<cron expression>\",
-    \"instruction\": ${INSTRUCTION},
-    \"enabled\": true,
-    \"agent_id\": \"<slug agent ou null>\",
-    \"skill_id\": \"<slug skill ou null>\"
-  }"
+url = f"{os.environ['SUPABASE_URL']}/rest/v1/tenant_crons"
+key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
+org = os.environ['ORG_ID']
+
+body = {
+    "org_id": org,
+    "name": NAME,
+    "schedule": SCHEDULE,
+    "instruction": INSTRUCTION,
+    "enabled": True,
+    "agent_id": AGENT_ID,
+    "skill_id": SKILL_ID,
+}
+
+req = urllib.request.Request(
+    url,
+    data=json.dumps(body).encode("utf-8"),
+    headers={
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    },
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=10) as r:
+        resp = json.loads(r.read().decode())
+        print("OK", json.dumps(resp[0] if isinstance(resp, list) else resp, ensure_ascii=False))
+except urllib.error.HTTPError as e:
+    print("ERR", e.code, e.read().decode()[:300])
 ```
 
-4. Parse la réponse JSON pour récupérer `id`. Renvoie `{"success": true, "cron_id": "<id>"}`.
+## Cron expression reference
 
-5. Erreurs typiques :
-   - 400 : `schedule` invalide (5 champs requis : minute heure jour mois jour-semaine).
-   - 23505 (unique violation) : un cron du même nom existe déjà — propose un nom différent ou une mise à jour.
+- « tous les matins à 8h » → `0 8 * * *`
+- « chaque lundi à 9h » → `0 9 * * 1`
+- « toutes les 30 min » → `*/30 * * * *`
+- « tous les jours ouvrés à 10h » → `0 10 * * 1-5`
+- Si flou (« souvent », « régulièrement »), demande précision avant.
 
 ## Format de réponse à l'utilisateur
 
+Après succès :
 ```
-Cron créé : recap_matin_8h
-Tous les jours à 8h, je te ferai un récap (emails, tâches, RDV).
+✅ Cron créé : `recap_matin_8h`
+Tous les jours à 8h, je te ferai un récap (météo, tâches, emails).
 
 [[goto:/cron|Voir mes crons]]
 ```
 
-## Style
-
-- Confirme avec **le nom du cron + l'horaire en français + l'action** en 1 phrase.
-- Si l'utilisateur veut modifier ou désactiver, oriente vers `/cron` page (pas de `cron-sync` update pour l'instant).
+En cas d'erreur HTTP, dis simplement « pas pu enregistrer le cron, raison : <message court> » sans étaler la stack.

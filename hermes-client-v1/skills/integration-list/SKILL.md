@@ -1,7 +1,7 @@
 ---
 name: integration-list
 description: Liste les intégrations Composio actuellement connectées pour ce tenant en lisant Supabase tenant_integrations. À appeler avant toute réponse sur "quelles intégrations sont connectées" — ne jamais deviner.
-version: 1.0.1
+version: 2.0.0
 author: Hermès Platform
 license: MIT
 dependencies: []
@@ -16,44 +16,46 @@ metadata:
 
 ## When to Use
 
-L'utilisateur demande quelles intégrations sont connectées (« quelles intégrations », « est-ce que Gmail est branché », « mes outils connectés », « je peux faire X avec Stripe ? »).
-
-Tu **ne dois jamais deviner** — la vérité vit dans Supabase `tenant_integrations`. Ce skill la lit pour toi.
+Utilisateur demande quelles intégrations sont connectées (« quelles intégrations », « est-ce que Gmail est branché », « mes outils connectés »). Tu **ne dois jamais deviner** — la vérité vit dans `tenant_integrations`.
 
 ## Quick Reference
 
 **Input** : aucun.
-**Output** : liste structurée `[{provider, status, display_account, connected_at}]`.
+**Output** : liste structurée `[{provider, status, display_account, ...}]`.
 
 ## Procedure
 
-1. Variables d'env (déjà injectées) :
-   - `SUPABASE_URL` (ex: `http://supabase-kong:8000`)
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `ORG_ID`
+**Une seule étape** : appelle `execute_code` avec ce script Python.
 
-2. Requête HTTP via `terminal` :
+```python
+import os, json, urllib.request, urllib.error
 
-```bash
-curl -sS "${SUPABASE_URL}/rest/v1/tenant_integrations?org_id=eq.${ORG_ID}&select=provider,status,display_account,backend,last_used_at,last_error" \
-  -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-  -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
-  -H "Accept: application/json"
+url = (
+    f"{os.environ['SUPABASE_URL']}/rest/v1/tenant_integrations"
+    f"?org_id=eq.{os.environ['ORG_ID']}"
+    f"&select=provider,status,display_account,backend,last_used_at,last_error"
+)
+key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
+
+req = urllib.request.Request(
+    url,
+    headers={
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+    },
+)
+try:
+    with urllib.request.urlopen(req, timeout=10) as r:
+        rows = json.loads(r.read().decode())
+        print("OK", json.dumps(rows, ensure_ascii=False))
+except urllib.error.HTTPError as e:
+    print("ERR", e.code, e.read().decode()[:300])
 ```
-
-3. Parse la réponse JSON. Filtre par `status` :
-   - `active` → "connecté"
-   - `pending` → "en attente d'OAuth"
-   - `error` → "erreur (avec last_error)"
-
-4. Si la liste est vide : retourne explicitement `{"connected": [], "message": "Aucune intégration connectée"}`. Ne propose pas de noms imaginaires.
-
-5. Si erreur HTTP, retourne `{"success": false, "error": "<msg>"}` ; ne pas inventer.
 
 ## Format de réponse à l'utilisateur
 
-Réponds en 2-4 lignes max :
-
+Si liste non vide :
 ```
 Voici tes intégrations actives :
 - Gmail (compte joshua@webstate.fr, depuis le 28/04)
@@ -62,8 +64,7 @@ Voici tes intégrations actives :
 [[goto:/integrations|Gérer mes intégrations]]
 ```
 
-Si rien :
-
+Si vide :
 ```
 Aucune intégration connectée pour l'instant.
 [[goto:/integrations|Connecter Gmail / Outlook / Stripe…]]
