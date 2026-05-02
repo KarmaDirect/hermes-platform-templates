@@ -35,39 +35,41 @@ Utilisateur dit « crée un cron », « planifie », « tous les matins », « c
 
 ## Procedure
 
-**Une seule étape** : appelle `execute_code` avec ce script Python (modifie `NAME`, `SCHEDULE`, `INSTRUCTION`, `AGENT_ID`, `SKILL_ID` selon la demande utilisateur). Tout est en Python stdlib, pas besoin de `jq` ni de `curl`.
+**Important** : utilise le tool `terminal` (PAS `execute_code` qui tourne dans un sandbox isolé sans accès aux env vars `SUPABASE_*`). Le terminal hérite de l'env du container.
 
-```python
+**Une seule étape** : appelle `terminal` avec ce one-liner Python (modifie `NAME`, `SCHEDULE`, `INSTRUCTION`, `AGENT_ID`, `SKILL_ID`).
+
+```bash
+python3 - <<'PYEOF'
 import os, json, urllib.request, urllib.error
 
-NAME        = "recap_matin_8h"          # snake_case court
-SCHEDULE    = "0 8 * * *"               # 5 fields cron expr
+NAME        = "recap_matin_8h"
+SCHEDULE    = "0 8 * * *"
 INSTRUCTION = "Fais-moi un récap matinal : météo La Rochelle, tâches du jour, emails non lus."
-AGENT_ID    = None                      # ex: "lea-secretaire" ou None
-SKILL_ID    = None                      # ex: "briefing-quotidien" ou None
+AGENT_ID    = None
+SKILL_ID    = None
 
 url = f"{os.environ['SUPABASE_URL']}/rest/v1/tenant_crons"
 key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
-org = os.environ['ORG_ID']
 
 body = {
-    "org_id": org,
-    "name": NAME,
-    "schedule": SCHEDULE,
+    "org_id":      os.environ['ORG_ID'],
+    "name":        NAME,
+    "schedule":    SCHEDULE,
     "instruction": INSTRUCTION,
-    "enabled": True,
-    "agent_id": AGENT_ID,
-    "skill_id": SKILL_ID,
+    "enabled":     True,
+    "agent_id":    AGENT_ID,
+    "skill_id":    SKILL_ID,
 }
 
 req = urllib.request.Request(
     url,
     data=json.dumps(body).encode("utf-8"),
     headers={
-        "apikey": key,
+        "apikey":        key,
         "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation",
+        "Content-Type":  "application/json",
+        "Prefer":        "return=representation",
     },
     method="POST",
 )
@@ -77,7 +79,10 @@ try:
         print("OK", json.dumps(resp[0] if isinstance(resp, list) else resp, ensure_ascii=False))
 except urllib.error.HTTPError as e:
     print("ERR", e.code, e.read().decode()[:300])
+PYEOF
 ```
+
+Le heredoc `'PYEOF'` (single-quoted) empêche toute interpolation shell — apostrophes françaises et `${var}` ne sont jamais interprétés.
 
 ## Cron expression reference
 

@@ -25,9 +25,12 @@ Utilisateur demande quelles intégrations sont connectées (« quelles intégrat
 
 ## Procedure
 
-**Une seule étape** : appelle `execute_code` avec ce script Python.
+**Important** : utilise le tool `terminal` (PAS `execute_code` qui tourne dans un sandbox isolé sans accès aux env vars `SUPABASE_*`).
 
-```python
+**Une seule étape** : appelle `terminal` avec ce one-liner Python.
+
+```bash
+python3 - <<'PYEOF'
 import os, json, urllib.request, urllib.error
 
 url = (
@@ -40,9 +43,9 @@ key = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 req = urllib.request.Request(
     url,
     headers={
-        "apikey": key,
+        "apikey":        key,
         "Authorization": f"Bearer {key}",
-        "Accept": "application/json",
+        "Accept":        "application/json",
     },
 )
 try:
@@ -51,6 +54,7 @@ try:
         print("OK", json.dumps(rows, ensure_ascii=False))
 except urllib.error.HTTPError as e:
     print("ERR", e.code, e.read().decode()[:300])
+PYEOF
 ```
 
 ## Format de réponse à l'utilisateur
