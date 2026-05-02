@@ -70,10 +70,15 @@ services:
       # ----- Runtime tuning -----
       TZ:                  ${TZ:-Europe/Paris}
       LOG_LEVEL:           ${LOG_LEVEL:-info}
+    # Volumes: the Hermès image stores all runtime state (sessions, profiles,
+    # logs, skills, response_store.db, state.db, ...) under HERMES_HOME=/opt/data
+    # — NOT under /data. The previous template mapped named volumes onto /data
+    # and /skills, which the runtime never wrote to, so /opt/data lived in an
+    # anonymous volume that Coolify recreated on every redeploy and silently
+    # lost every chat session. Map the named volumes onto the actual paths the
+    # runtime uses so state survives redeploys.
     volumes:
-      - hermes_data:/data
-      - hermes_skills:/skills
-      - hermes_profiles:/profiles
+      - hermes_data:/opt/data
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9119/health"]
       interval: 30s
@@ -145,14 +150,18 @@ services:
       coolify.managed: "true"
 
 volumes:
+  # Single named volume mounted at /opt/data — see the `volumes:` block on
+  # the hermes service for why we collapsed three volumes into one. We use
+  # COOLIFY_RESOURCE_UUID rather than CLIENT_SLUG because CLIENT_SLUG is
+  # only set in the service environment (not at compose-render time), so
+  # `${CLIENT_SLUG:-unknown}` here was always rendered as the literal
+  # string "unknown" — every tenant ended up sharing volume names like
+  # `hermes_unknown_data`, with predictably terrible results once a 2nd
+  # tenant was provisioned.
   hermes_data:
-    name: hermes_${CLIENT_SLUG:-unknown}_data
-  hermes_skills:
-    name: hermes_${CLIENT_SLUG:-unknown}_skills
-  hermes_profiles:
-    name: hermes_${CLIENT_SLUG:-unknown}_profiles
+    name: hermes_${COOLIFY_RESOURCE_UUID:-singleton}_data
   paperclip_data:
-    name: paperclip_${CLIENT_SLUG:-unknown}_data
+    name: paperclip_${COOLIFY_RESOURCE_UUID:-singleton}_data
 
 networks:
   coolify:
