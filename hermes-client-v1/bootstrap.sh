@@ -84,6 +84,17 @@ export CONTACT_EMAIL="${CONTACT_EMAIL:-non-renseigné}"
 #   these files end up owned by root or contain a stale PID — and the next boot
 #   as user hermes can't overwrite them, so gateway crashes with PermissionError
 #   and the container is wedged. We aggressively clean before re-exec'ing.
+#
+# WARNING — same trap with auth.json (OAuth credential pool):
+#   If an admin runs `docker exec hermes-X hermes auth add openai-codex` WITHOUT
+#   `-u hermes`, docker defaults to root and the resulting /opt/data/auth.json
+#   ends up root-owned. The hermes process (uid 10000) then can't read its own
+#   credentials, the dashboard reports "non connecté" even though `hermes auth
+#   status` from a root shell says "logged in", and the only fix is a container
+#   restart (which re-runs this chown -R). Always use `docker exec -u hermes …`
+#   when poking at the credential store, OR call the control-plane endpoint
+#   `POST /api/providers/oauth/{provider}/start` from the dashboard which
+#   executes inside the hermes process directly.
 if [[ "$(id -u)" == "0" ]]; then
   for d in "${DATA_DIR}" "${PROFILES_DIR}" "${SKILLS_DIR}"; do
     if [[ -d "$d" ]]; then
