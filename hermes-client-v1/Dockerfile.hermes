@@ -7,10 +7,21 @@
 # script that renders configs from environment variables at first boot.
 #
 # Notes / TODOs:
-#   - Base image tag `nousresearch/hermes-agent:v2026.4.30` (= v0.12.0, "Curator"
-#     release, April 30 2026). Brings autonomous skill curation + plugin host
-#     gateway + DeepSeek V4 on Nous Portal + cold start −57%. If the image is
-#     private, the control-plane must `docker login` before build.
+#   - 2026-05-13 — UPGRADE 0.12 → 0.13 "Tenacity" (release 7 mai 2026).
+#     Apporte : Kanban multi-agent durable (heartbeats + zombie detection +
+#     retry budgets + hallucination-recovery gate), /goal command natif (objectif
+#     persistant + judge model, survit aux restarts), structured handoffs via
+#     `kanban_complete(summary, metadata)` (JSON machine-readable inter-agents),
+#     video analysis, voice cloning xAI, **session auto-resume après restart
+#     gateway** (fixe douleur OAuth Codex refresh_token_reused).
+#   - Breaking changes 0.12 → 0.13 :
+#       * Secret redaction default OFF dans v0.13 → on force ON dans config.yaml.tpl
+#         (sinon api_token/secrets risquent d'apparaître dans logs/sessions).
+#       * Skills format SKILL.md inchangé ; pas de migration nécessaire.
+#       * Curator (0.12) toujours présent — pas d'impact négatif.
+#   - Tag exact à vérifier avant build (`docker manifest inspect`). Si v2026.5.7
+#     n'existe pas, fallback v2026.5.* le plus récent ou pin via SHA256 digest.
+#   - Si l'image upstream est privée, le control-plane doit `docker login` avant build.
 #   - Default UID/GID inside the upstream image is 1000:1000 (`hermes` user).
 #     We chown our injected files to keep file ownership consistent.
 #   - Real ENTRYPOINT/CMD of the base image is unconfirmed. We override with
@@ -39,7 +50,10 @@ RUN apk add --no-cache dos2unix \
  && chmod +x /staging/bootstrap.sh
 
 # ---------- Stage 2 : runtime ----------
-FROM nousresearch/hermes-agent:v2026.4.30
+# Bumped 2026-05-13 : v2026.4.30 (0.12 "Curator") → v2026.5.7 (0.13 "Tenacity").
+# Si build échoue (tag inexistant), tester v2026.5.6 puis v2026.5.7-rc1.
+# Voir https://github.com/NousResearch/hermes-agent/releases pour le tag exact.
+FROM nousresearch/hermes-agent:v2026.5.7
 
 # Metadata
 LABEL org.opencontainers.image.title="Hermes Client Edition v1"
@@ -63,12 +77,36 @@ RUN set -eux; \
 # Le plugin Python `rtk-hermes` intercepte les appels au tool `terminal` et
 # délègue à `rtk rewrite` pour optimiser. Source : ogallotti/rtk-hermes.
 # Cf. memory:reference_hermes_repos_findings.md Sprint 3.
+#
+# Sprint UX-écosystème 2026-05-13 : ajout `browser-use` pour skills web (Pages
+# Jaunes, avis Google/TripAdvisor, AO publics). Cf. skills/browser-use-runner/
+# + skills/scraper-pages-jaunes/ + skills/monitor-avis-clients/ +
+# skills/scrap-chantiers-concurrence/. ROADMAP_2026-05.md Phase 11.
+#
+# Headless Chromium pour browser-use : installé via Playwright (browser-use
+# wrappe playwright). On installe les deps OS + le browser dans /opt/playwright.
 RUN set -eux; \
+    # 1. RTK shell compressor (déjà existant)
     curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh || true; \
     if [ -x /opt/hermes/.venv/bin/python ]; then \
       /opt/hermes/.venv/bin/python -m ensurepip --upgrade 2>/dev/null || true; \
       /opt/hermes/.venv/bin/python -m pip install --no-cache-dir rtk-hermes 2>/dev/null \
-        || echo "[build] rtk-hermes pip install skipped (pip absent or install failed) — install at runtime"; \
+        || echo "[build] rtk-hermes pip install skipped (pip absent or install failed)"; \
+      # 2. browser-use + Playwright (Chromium headless) pour skills web
+      /opt/hermes/.venv/bin/python -m pip install --no-cache-dir browser-use playwright 2>/dev/null \
+        || echo "[build] browser-use pip install skipped — install at runtime"; \
+      # Playwright a besoin de deps OS (libnss3, libatk, etc.) — best-effort apt
+      if command -v apt-get >/dev/null 2>&1; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+          libnss3 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+          libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+          fonts-liberation \
+          && rm -rf /var/lib/apt/lists/* || true; \
+      fi; \
+      # Install Chromium browser pour Playwright (no-deps car deps installées au-dessus)
+      /opt/hermes/.venv/bin/python -m playwright install chromium --with-deps 2>/dev/null \
+        || /opt/hermes/.venv/bin/python -m playwright install chromium 2>/dev/null \
+        || echo "[build] playwright chromium install skipped — runtime"; \
     fi
 
 # Pre-create the directory layout the runtime expects.
