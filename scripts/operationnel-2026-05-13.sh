@@ -148,19 +148,18 @@ if ! $SKIP_MIGRATIONS; then
   echo "[3/6] Migrations Supabase Hermès..."
   MIGRATIONS_DIR="/tmp/migrations-20260513"
 
-  # Récup migrations depuis branche sprint (déjà push)
-  if [[ ! -d /opt/hermes-platform ]]; then
-    sudo git clone https://github.com/KarmaDirect/hermes-platform.git /opt/hermes-platform 2>&1 | tail -2 || true
-  fi
-  sudo git -C /opt/hermes-platform fetch origin 2>&1 | tail -2 || true
-  sudo git -C /opt/hermes-platform checkout sprint-ux-2026-05-13 2>&1 | tail -2 || true
-  sudo git -C /opt/hermes-platform pull origin sprint-ux-2026-05-13 2>&1 | tail -2 || true
+  # Les migrations sont attendues dans /tmp/20260513*.sql (déjà transférées via scp
+  # par Claude lors d'une session précédente). Si absentes : skip avec message.
   sudo mkdir -p "$MIGRATIONS_DIR"
-  sudo cp /opt/hermes-platform/supabase/migrations/20260513*.sql "$MIGRATIONS_DIR/" 2>/dev/null || true
+  if ls /tmp/20260513*.sql >/dev/null 2>&1; then
+    sudo cp /tmp/20260513*.sql "$MIGRATIONS_DIR/" 2>/dev/null || true
+  fi
 
   COUNT=$(ls "$MIGRATIONS_DIR"/20260513*.sql 2>/dev/null | wc -l || echo 0)
   if [[ "$COUNT" != "6" ]]; then
-    echo "❌ Attendu 6 migrations, trouvé $COUNT. Abandon migrations."
+    echo "❌ Attendu 6 migrations dans /tmp/, trouvé $COUNT. Repo hermes-platform privé."
+    echo "    Pour fix : scp depuis ton poste local :"
+    echo "    scp 'landing agent ia/supabase/migrations/20260513*.sql' ubuntu@51.75.24.107:/tmp/"
     SKIP_MIGRATIONS=true
   fi
 fi
@@ -301,7 +300,7 @@ fi
 # ---------------------------------------------------------------------------
 if ! $SKIP_UPGRADE; then
   echo ""
-  echo "[6/6] Upgrade webstate-test vers Hermès 0.13 (dry-run forcé pour sécurité)..."
+  echo "[6/6] Upgrade tenant test vers Hermès 0.13 (dry-run forcé pour sécurité)..."
   UPGRADE_SCRIPT="/opt/hermes-platform-templates/scripts/upgrade-tenant-hermes-013.sh"
   if [[ ! -f "$UPGRADE_SCRIPT" ]]; then
     if [[ ! -d /opt/hermes-platform-templates ]]; then
@@ -311,18 +310,26 @@ if ! $SKIP_UPGRADE; then
     sudo git -C /opt/hermes-platform-templates checkout ecosystem-0.13-browser-use 2>&1 | tail -2 || true
     sudo git -C /opt/hermes-platform-templates pull origin ecosystem-0.13-browser-use 2>&1 | tail -2 || true
   fi
-  if [[ -f "$UPGRADE_SCRIPT" ]]; then
-    # Toujours dry-run dans le batch (le user lancera l'upgrade réel via UI dashboard ou manuellement)
-    sudo bash "$UPGRADE_SCRIPT" webstate-test --dry-run 2>&1 | tail -30
+
+  # Auto-détecte le tenant à upgrader (le 1er container actif matching hermes-*)
+  # car nos slugs réels sont des coolify UUIDs (yy0n..., q4z8..., i8zp...), pas "webstate-test".
+  TEST_TENANT=$(sudo docker ps --filter "name=hermes-" --format '{{.Names}}' \
+    | grep -vE 'control-plane|dashboard' | head -1 | sed -E 's/^hermes-([a-z0-9]+)-.*$/\1/')
+
+  if [[ -z "$TEST_TENANT" ]]; then
+    echo "❌ Aucun container tenant actif. SKIP upgrade."
+  elif [[ -f "$UPGRADE_SCRIPT" ]]; then
+    echo "Tenant cible détecté : $TEST_TENANT"
+    sudo bash "$UPGRADE_SCRIPT" "$TEST_TENANT" --dry-run 2>&1 | tail -30
     echo ""
     echo "ℹ Pour faire l'upgrade RÉEL après revue dry-run :"
-    echo "   sudo bash $UPGRADE_SCRIPT webstate-test"
+    echo "   sudo bash $UPGRADE_SCRIPT $TEST_TENANT"
     echo "ℹ OU via dashboard admin : https://hermes.webstate.pro/admin/upgrades"
   else
     echo "❌ Script upgrade introuvable même après pull. Investiguer."
   fi
 else
-  echo "[6/6] Upgrade webstate-test — SKIP"
+  echo "[6/6] Upgrade tenant test — SKIP"
 fi
 
 # ---------------------------------------------------------------------------
