@@ -1,0 +1,94 @@
+name: crm-doublons
+version: 1.0.0
+description: Audit doublons CRM (email, phone E.164, nom+ville fuzzy) avec rapport et suggestion fusion. Pas d'action automatique, HITL requis pour fusionner.
+author: Hermès Platform
+category: crm
+license: MIT
+
+triggers:
+  - type: webhook
+    path: /crm/doublons-audit
+    method: POST
+  - type: channel-message
+    channels: [web, telegram]
+    match:
+      keywords: [doublons, doublon, "audit crm", "hygiène crm", "contacts en double", "clients en double"]
+  - type: cron
+    schedule: "0 8 1 * *"  # 1er du mois 8h UTC, audit complet
+    payload:
+      scope: all
+      min_confidence: 0.85
+      limit_groups: 100
+
+inputs:
+  scope:
+    type: string
+    enum: [contacts, leads, fournisseurs, all]
+    default: contacts
+    required: false
+  min_confidence:
+    type: number
+    minimum: 0.5
+    maximum: 1.0
+    default: 0.85
+    required: false
+  limit_groups:
+    type: integer
+    minimum: 1
+    maximum: 500
+    default: 50
+    required: false
+  exclude_ids:
+    type: array
+    items: { type: string }
+    default: []
+    required: false
+
+outputs:
+  audit_id: { type: string, required: true }
+  scope_audited: { type: string, required: true }
+  total_records: { type: integer, required: true }
+  groups_found: { type: integer, required: true }
+  groups:
+    type: array
+    items:
+      group_id: string
+      match_reason:
+        enum: [email_exact, phone_e164_exact, name_city_similar, siret_exact, shared_corporate_email]
+      confidence: number
+      primary_id: string
+      primary_summary: string
+      duplicates:
+        type: array
+        items:
+          id: string
+          summary: string
+          fields_matching: array
+          fields_diverging: array
+      merge_suggestion:
+        keep_id: string
+        merge_fields: object
+        delete_ids: array
+  stats_by_reason: object
+  next_action:
+    enum: [review_groups, no_duplicates_found, scope_too_small]
+
+requires:
+  llm: stepfun/step-3.5-flash  # default Hermès, fonctionne sur tout tenant
+  llm_fallback: anthropic/claude-haiku-4-5
+  skills_required: [crm-client-lookup]
+
+human_in_the_loop:
+  required: false  # le skill produit juste un rapport, la fusion ultérieure exige HITL
+  channel: telegram
+  prompt: "Audit CRM terminé — {groups_found} groupes de doublons trouvés. Veux-tu en revoir un ?"
+  fallback_channel: email
+
+credentials_required: []  # uniquement les credentials Supabase déjà set au boot
+credentials_optional:
+  - TELEGRAM_BOT_TOKEN  # pour le résumé de cron mensuel
+  - TELEGRAM_CHAT_ID
+
+costs:
+  per_invocation_eur: 0.002
+  notes: "Lecture DB + 1 prompt LLM résumé. Pas de vision. Sur 5000 contacts ~3-5s."

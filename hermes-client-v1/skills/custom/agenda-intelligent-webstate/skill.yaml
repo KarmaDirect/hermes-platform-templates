@@ -1,0 +1,46 @@
+name: agenda-intelligent-webstate
+version: 1.0.0
+description: Propose créneaux selon dispo équipe + crée RDV dans Webstate + active rappels SMS natifs.
+author: Hermès Platform
+category: agenda
+license: MIT
+
+triggers:
+  - type: channel-message
+    channels: [web, whatsapp, telegram, voice]
+    match:
+      keywords: [rdv, rendez-vous, créneau, dispo, "passez chez", "venir voir", "intervention"]
+  - type: webhook
+    path: /agenda/propose
+    method: POST
+
+inputs:
+  contact_id: string
+  purpose: { enum: [visite_chantier, rdv_client, consultation, livraison, reunion, autre] }
+  preferred_window: { type: string, default: tout }
+  duration_min: { type: integer, default: 60 }
+  location: { type: string, required: false }
+
+outputs:
+  appointment_id: string
+  proposed_slots: array
+  confirmation_method: string
+  next_action: { enum: [wait_client_confirm, confirmed_booked, fallback_callback] }
+
+requires:
+  llm: stepfun/step-3.5-flash
+  skills_required: [crm-webstate]
+  skills_optional: [confirmation-hub]
+
+human_in_the_loop:
+  required: false
+  channel: telegram
+
+disable_when_env_missing:
+  - WEBSTATE_REFRESH_TOKEN
+
+enabled_by_default: false
+
+costs:
+  per_invocation_eur: 0.001
+  notes: "1-2 fetch dispo + 1 SMS confirmation"

@@ -1,0 +1,36 @@
+name: pilote-automations-webstate
+version: 1.0.0
+description: Toggle ON/OFF + configure les 41 automations natives Webstate en langage naturel.
+author: Hermès Platform
+category: configuration
+license: MIT
+
+triggers:
+  - type: channel-message
+    channels: [web, telegram, whatsapp]
+    match:
+      keywords: [automation, automatisation, "active", "désactive", "rappel", "relance", "sms automatique", "email auto"]
+
+inputs:
+  intent: { enum: [list, enable, disable, configure] }
+  automation_type: { type: string, required: false }
+  config_changes: { type: object, required: false }
+
+outputs:
+  ok: boolean
+  automations_total: integer
+  automations_active: integer
+  changed: object
+
+requires:
+  llm: stepfun/step-3.5-flash
+  skills_required: [crm-webstate]
+  skills_optional: [confirmation-hub]
+
+disable_when_env_missing:
+  - WEBSTATE_REFRESH_TOKEN
+
+enabled_by_default: false
+
+costs:
+  per_invocation_eur: 0.001

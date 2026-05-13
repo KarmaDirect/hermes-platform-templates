@@ -1,0 +1,44 @@
+name: devis-conversationnel-webstate
+version: 1.0.0
+description: Devis Webstate à partir d'une conversation naturelle avec contexte historique client.
+author: Hermès Platform
+category: commercial
+license: MIT
+
+triggers:
+  - type: channel-message
+    channels: [web, whatsapp, telegram, voice]
+    match:
+      keywords: ["fais un devis", "fais-moi un devis", "estime", "chiffrer", "combien ça coûte", "prépare un devis"]
+
+inputs:
+  contact_query: { type: string }
+  scope: { type: string }
+  vat_mode: { type: string, default: "10%" }
+  send_now: { type: boolean, default: false }
+
+outputs:
+  quote_id: string
+  quote_number: string
+  contact_id: string
+  total_ttc: number
+  ready_to_send: boolean
+
+requires:
+  llm: anthropic/claude-haiku-4-5
+  llm_fallback: stepfun/step-3.5-flash
+  skills_required: [crm-webstate]
+  skills_optional: [devis-photo, confirmation-hub]
+
+human_in_the_loop:
+  required_if: ["total_ttc > 5000"]
+  channel: telegram
+
+disable_when_env_missing:
+  - WEBSTATE_REFRESH_TOKEN
+
+enabled_by_default: false
+
+costs:
+  per_invocation_eur: 0.01
+  notes: "1-2 LLM longs (compose items) + 3-5 fetches contexte"

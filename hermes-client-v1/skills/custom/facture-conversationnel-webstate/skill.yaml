@@ -1,0 +1,49 @@
+name: facture-conversationnel-webstate
+version: 1.0.0
+description: Crée facture Webstate avec workflow HITL (récap+confirmation) et PDF aperçu dans le chat. Optionnel transformation devis→facture, lien paiement Stripe, e-facture Factur-X.
+author: Hermès Platform
+category: facturation
+license: MIT
+
+triggers:
+  - type: channel-message
+    channels: [web, whatsapp, telegram, voice]
+    match:
+      keywords: ["facture", "facturer", "encaisser", "paiement", "transforme le devis", "édite une facture"]
+
+inputs:
+  contact_query: { type: string, required: false }
+  scope: { type: string, required: false }
+  from_quote_id: { type: string, required: false }
+  vat_mode: { type: string, default: "10%" }
+  payment_mode: { enum: [transfer, stripe, cash, check], default: stripe }
+  due_days: { type: integer, default: 30 }
+  send_now: { type: boolean, default: false }
+
+outputs:
+  invoice_id: string
+  invoice_number: string
+  total_ttc: number
+  pdf_url: string
+  stripe_payment_link: string
+  ready_to_send: boolean
+
+requires:
+  llm: anthropic/claude-haiku-4-5
+  llm_fallback: stepfun/step-3.5-flash
+  skills_required: [crm-webstate]
+  skills_optional: [devis-conversationnel-webstate, confirmation-hub]
+
+human_in_the_loop:
+  required: true   # CRITIQUE — toujours HITL avant émission facture
+  channel: chat_inline
+  prompt: "Récap facture — confirme avant envoi (client/lignes/TVA/échéance/mode paiement)"
+
+disable_when_env_missing:
+  - WEBSTATE_REFRESH_TOKEN
+
+enabled_by_default: false
+
+costs:
+  per_invocation_eur: 0.012
+  notes: "1 LLM compose + recap + 1 INSERT + 1 PDF + 1 Stripe link + 1 SMS optionnel"

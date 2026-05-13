@@ -1,0 +1,36 @@
+name: avis-google-webstate
+version: 1.0.0
+description: SMS demande avis Google post-facture payée. Suit conversion.
+author: Hermès Platform
+category: marketing
+license: MIT
+
+triggers:
+  - type: cron
+    schedule: "0 9 * * 1-6"
+  - type: webhook
+    path: /avis/request
+    method: POST
+
+inputs:
+  invoice_id: { type: string, required: false }
+  batch_limit: { type: integer, default: 10 }
+
+outputs:
+  sms_sent: integer
+  skipped: integer
+  errors: array
+
+requires:
+  llm: stepfun/step-3.5-flash
+  skills_required: [crm-webstate]
+
+disable_when_env_missing:
+  - WEBSTATE_REFRESH_TOKEN
+  - GOOGLE_PLACE_ID
+
+enabled_by_default: false
+
+costs:
+  per_invocation_eur: 0.005
+  notes: "Twilio SMS ~0.04€ x 10 max"

@@ -1,0 +1,86 @@
+name: crm-webstate
+version: 1.0.0
+description: Pilote CRM Webstate SaaS via JWT bot user (contacts, devis, factures, RDV). Lit les env vars WEBSTATE_API_URL/REFRESH_TOKEN/ORG_ID poussées par l'admin Hermès.
+author: Hermès Platform
+category: crm
+license: MIT
+
+triggers:
+  - type: webhook
+    path: /webstate/{action}
+    method: POST
+  - type: channel-message
+    channels: [web, telegram, whatsapp]
+    match:
+      keywords:
+        - contact
+        - contacts
+        - prospect
+        - lead
+        - client
+        - "fournisseur"
+        - devis
+        - facture
+        - facturation
+        - "rdv"
+        - "rendez-vous"
+        - agenda
+        - calendrier
+        - planning
+        - impayé
+        - "à relancer"
+
+inputs:
+  action:
+    type: string
+    enum:
+      - list_contacts
+      - get_contact
+      - create_contact
+      - update_contact
+      - list_quotes
+      - create_quote
+      - send_quote
+      - list_invoices
+      - create_invoice
+      - create_payment_link
+      - list_appointments
+      - create_appointment
+      - list_team_members
+      - list_stock_items
+    required: true
+  payload:
+    type: object
+    required: false
+
+outputs:
+  ok: boolean
+  data: object
+  count: integer
+  next_action: string
+
+requires:
+  llm: stepfun/step-3.5-flash
+  llm_fallback: anthropic/claude-haiku-4-5
+  skills_optional: [crm-doublons, devis-photo, confirmation-hub]
+
+human_in_the_loop:
+  required_for_actions:
+    - update_contact
+    - create_invoice
+    - send_quote
+  channel: telegram
+  prompt: "Action {action} sur Webstate — confirmer ?"
+
+credentials_required:
+  - WEBSTATE_API_URL
+  - WEBSTATE_REFRESH_TOKEN
+  - WEBSTATE_ORG_ID
+credentials_optional:
+  - WEBSTATE_BOT_EMAIL
+  - WEBSTATE_BOT_PASSWORD
+  - WEBSTATE_ANON_KEY
+
+costs:
+  per_invocation_eur: 0.001
+  notes: "Lecture pure : 1-2 fetch HTTP. Écriture : 2-3 fetch (auth refresh + write). Pas de LLM lourd."

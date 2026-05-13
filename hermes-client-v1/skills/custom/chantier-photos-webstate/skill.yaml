@@ -1,0 +1,47 @@
+name: chantier-photos-webstate
+version: 1.0.0
+description: Upload photos chantier dans Webstate avec vision IA + tagging auto.
+author: Hermès Platform
+category: btp
+license: MIT
+
+triggers:
+  - type: channel-message
+    channels: [whatsapp, telegram, email, web]
+    match:
+      has_image: true
+      keywords_optional: [chantier, photo, "avant", "pendant", "apres", "fin"]
+  - type: webhook
+    path: /chantier-photos/upload
+    method: POST
+
+inputs:
+  image_url: { type: string, required: true }
+  caption: { type: string, required: false }
+  chantier_hint: { type: string, required: false }
+  from_phone: { type: string, required: false }
+
+outputs:
+  site_photo_id: string
+  chantier_id: string
+  phase_detected: { enum: [avant, pendant, apres, inconnu] }
+  tags_detected: array
+  situation_pdf_generated: boolean
+
+requires:
+  llm: gemini/gemini-2.0-flash
+  llm_fallback: openai/gpt-4o-mini
+  skills_required: [crm-webstate]
+
+human_in_the_loop:
+  required_for: [situation_pdf_generation]
+  channel: telegram
+
+disable_when_env_missing:
+  - WEBSTATE_REFRESH_TOKEN
+
+enabled_by_default: false
+
+costs:
+  per_invocation_eur: 0.005
+  notes: "1 vision LLM + 1 upload storage + 2 inserts via wrapper"

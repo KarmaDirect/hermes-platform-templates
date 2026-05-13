@@ -1,0 +1,58 @@
+name: secretaire-webstate
+version: 1.0.0
+description: Réceptionne appels/messages entrants et les pousse dans le CRM Webstate (contact + activity + RDV + SMS confirmation). Skip si tenant non lié à Webstate.
+author: Hermès Platform
+category: secretariat
+license: MIT
+
+triggers:
+  - type: channel-message
+    channels: [voice, whatsapp, telegram, email, web]
+    match:
+      from_external: true
+  - type: webhook
+    path: /secretaire/incoming
+    method: POST
+
+inputs:
+  channel: { type: string, enum: [voice, whatsapp, telegram, email, web_chat] }
+  from_number: { type: string, required: false }
+  from_email: { type: string, required: false }
+  from_name: { type: string, required: false }
+  message: { type: string }
+  duration_sec: { type: integer, required: false }
+
+outputs:
+  contact_id: string
+  contact_action: { enum: [matched, created, skipped] }
+  intent: { enum: [rdv, devis, urgence, support, info, autre] }
+  activity_id: string
+  next_action: string
+  owner_alerted: boolean
+  skipped: boolean
+
+requires:
+  llm: stepfun/step-3.5-flash
+  llm_fallback: anthropic/claude-haiku-4-5
+  skills_required: [crm-webstate]
+  skills_optional: [confirmation-hub, agenda-intelligent-webstate, devis-conversationnel-webstate]
+
+human_in_the_loop:
+  required_for_intent: [urgence]
+  channel: telegram
+  prompt: "Appel URGENT de {from_name} : {message_summary}"
+
+credentials_required: []  # via crm-webstate
+credentials_optional:
+  - TELEGRAM_BOT_TOKEN
+  - TELEGRAM_CHAT_ID
+
+# CRITICAL : skip silently si tenant non lié à Webstate
+disable_when_env_missing:
+  - WEBSTATE_REFRESH_TOKEN
+
+enabled_by_default: false  # admin doit l'ajouter explicitement à enabled_skills
+
+costs:
+  per_invocation_eur: 0.003
+  notes: "1 LLM intent classify + 1-3 fetch HTTP + 1 SMS éventuel (Twilio)"

@@ -1,0 +1,36 @@
+name: reporting-ceo-webstate
+version: 1.0.0
+description: Briefing matin Telegram avec KPIs Webstate (CA, devis à relancer, RDV, équipe, alertes, leads).
+author: Hermès Platform
+category: reporting
+license: MIT
+
+triggers:
+  - type: cron
+    schedule: "0 6 * * 1-6"  # 6h UTC = 7h Paris hiver / 8h été, lun-sam
+  - type: channel-message
+    channels: [telegram, web]
+    match:
+      keywords: [brief, "résume", "où on en est", "rapport", "ma journée"]
+
+inputs:
+  scope: { enum: [today, week, month], default: today }
+  deliver: { enum: [telegram, email, both], default: telegram }
+
+outputs:
+  message_html: string
+  sent_to: array
+  kpis: object
+
+requires:
+  llm: stepfun/step-3.5-flash
+  skills_required: [crm-webstate]
+
+disable_when_env_missing:
+  - WEBSTATE_REFRESH_TOKEN
+  - TELEGRAM_BOT_TOKEN
+
+enabled_by_default: false
+
+costs:
+  per_invocation_eur: 0.002

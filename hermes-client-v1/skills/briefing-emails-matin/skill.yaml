@@ -1,0 +1,28 @@
+name: briefing-emails-matin
+version: 1.0.0
+description: Lit les emails non-lus Gmail des dernières 24h via Composio MCP et produit un briefing markdown court.
+author: Hermès Platform
+category: productivity
+triggers:
+  - type: cron
+    schedule: "0 8 * * 1-5"
+  - type: manual
+inputs:
+  lookback_hours: number?
+  max_emails: number?
+  owner_email: string?
+outputs:
+  briefing_markdown: string
+requires:
+  channels: []
+  llm: stepfun-3.5-flash
+  llm_fallback: deepseek-v4-flash
+  credentials_required:
+    - COMPOSIO_API_KEY
+  composio_apps:
+    - gmail
+config:
+  default_lookback_hours: 24
+  default_max_emails: 20
+human_in_the_loop:
+  required: false
