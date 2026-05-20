@@ -125,6 +125,56 @@ services:
       - coolify
 
   # ---------------------------------------------------------------------------
+  # Media gateway — sert /opt/data/public/ via Traefik à /m/*
+  # ---------------------------------------------------------------------------
+  # Permet à tous les skills d'exposer des fichiers (PNG, PDF, images générées)
+  # dans le chat Hermès via une URL publique unguessable.
+  #
+  # Usage côté skill :
+  #   from preview import publish_to_chat
+  #   url = publish_to_chat("/tmp/output.png")
+  #   # → "https://<tenant>.webstate.pro/m/<random-token>.png"
+  #
+  # Sécurité :
+  #   - Token random 16 bytes (256 bits entropie)
+  #   - Cleanup auto J+2 via cron host
+  #   - Volume monté en read-only sur la gateway (caddy ne peut pas écrire)
+  #   - Pas d'index browsing (file_server sans --browse)
+  media:
+    container_name: media-${COOLIFY_RESOURCE_UUID:-singleton}
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    command:
+      - caddy
+      - file-server
+      - --root
+      - /srv/public
+      - --listen
+      - ':80'
+    volumes:
+      - hermes_data:/srv:ro
+    labels:
+      hermes.platform.client: ${CLIENT_SLUG:-unknown}
+      hermes.platform.service: media-gateway
+      coolify.managed: "true"
+      traefik.enable: "true"
+      traefik.docker.network: "coolify"
+      traefik.http.services.media-${COOLIFY_RESOURCE_UUID:-singleton}-svc.loadbalancer.server.port: "80"
+      # Router /m/* HTTPS — priority > hermes catch-all
+      traefik.http.routers.media-${COOLIFY_RESOURCE_UUID:-singleton}-https.rule: "Host(`${SERVICE_FQDN_HERMES}`) && PathPrefix(`/m/`)"
+      traefik.http.routers.media-${COOLIFY_RESOURCE_UUID:-singleton}-https.entrypoints: "https"
+      traefik.http.routers.media-${COOLIFY_RESOURCE_UUID:-singleton}-https.priority: "100"
+      traefik.http.routers.media-${COOLIFY_RESOURCE_UUID:-singleton}-https.tls: "true"
+      traefik.http.routers.media-${COOLIFY_RESOURCE_UUID:-singleton}-https.tls.certresolver: "letsencrypt"
+      traefik.http.routers.media-${COOLIFY_RESOURCE_UUID:-singleton}-https.service: "media-${COOLIFY_RESOURCE_UUID:-singleton}-svc"
+      # Strip /m prefix avant de passer à caddy file-server
+      traefik.http.middlewares.media-${COOLIFY_RESOURCE_UUID:-singleton}-strip.stripprefix.prefixes: "/m"
+      traefik.http.routers.media-${COOLIFY_RESOURCE_UUID:-singleton}-https.middlewares: "media-${COOLIFY_RESOURCE_UUID:-singleton}-strip"
+    networks:
+      - default
+      - coolify
+
+  # ---------------------------------------------------------------------------
   # Optional: Paperclip (issue tracker / task queue used by some skills)
   # Activate with:  docker compose --profile with-paperclip up -d
   # ---------------------------------------------------------------------------

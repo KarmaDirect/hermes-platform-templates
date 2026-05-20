@@ -111,6 +111,17 @@ if [[ "$(id -u)" == "0" ]]; then
 fi
 
 mkdir -p "${CONFIG_DIR}" "${PROFILES_DIR}" "${SKILLS_DIR}"
+
+# Media gateway public folder — partagé avec le sidecar caddy (service `media`)
+# qui sert /opt/data/public/ via Traefik à /m/* pour exposer les assets générés
+# par les skills (carousels, PDF devis, photos chantier, etc.) dans le chat.
+mkdir -p "${DATA_DIR}/public"
+chmod 755 "${DATA_DIR}/public"
+# Healthcheck file pour tester le routing après spin-up
+if [[ ! -f "${DATA_DIR}/public/healthcheck.txt" ]]; then
+  echo "ok-media-gateway-$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${DATA_DIR}/public/healthcheck.txt"
+fi
+
 rm -f "${READY_FILE}"
 
 # =============================================================================
