@@ -150,8 +150,17 @@ render_tpl "${TEMPLATE_DIR}/config/AGENTS.md.tpl"     "${DATA_DIR}/AGENTS.md"
 render_tpl "${TEMPLATE_DIR}/config/SOUL.md.tpl"       "${DATA_DIR}/SOUL.md"
 
 # =============================================================================
-# 2. Initialize Hermes profile (first boot only)
+# 2. Initialize Hermes profile (first boot only) — RÈGLE : 1 profile = 1 tenant
 # =============================================================================
+# PRINCIPE (mémoire ecosystem_watch 2026-05-26) : 1 container = 1 tenant client =
+# 1 SEUL profile Hermès. Le profile `default` créé par l'install Hermès doit
+# céder la place au profile du client. Si `hermes profile list` retourne >1
+# profile actif sur un tenant en prod, c'est un bug à fixer en P0.
+#
+# Le bootstrap.sh fait donc 3 choses :
+#   a. Crée le profile du client (first boot seulement)
+#   b. SWITCH le profile actif sur le client (à chaque boot, idempotent)
+#   c. (Optionnel) Désactive/supprime le profile `default` pour éviter dérive
 PROFILE_PATH="${PROFILES_DIR}/${CLIENT_SLUG}"
 if [[ ! -d "${PROFILE_PATH}" ]]; then
   log "Initializing Hermes profile: ${CLIENT_SLUG}"
@@ -169,6 +178,30 @@ if [[ ! -d "${PROFILE_PATH}" ]]; then
   fi
 else
   log "Profile already exists at ${PROFILE_PATH} (skip init)"
+fi
+
+# 2.b — SWITCH le profile actif sur le client (idempotent à chaque boot)
+# Sans ce switch, le gateway démarre sur `default` qui est créé par l'install
+# Hermès et reste actif tant qu'on ne switch pas → 2 profiles cohabitent et
+# les crons/skills/auth se retrouvent sur le mauvais. C'est la racine du bug
+# rencontré sur tenant Webstate le 2026-05-26.
+if [[ -x "${HERMES_BIN}" ]]; then
+  log "Switching active profile to: ${CLIENT_SLUG}"
+  "${HERMES_BIN}" profile use "${CLIENT_SLUG}" \
+    || warn "hermes profile use ${CLIENT_SLUG} failed (continuing, gateway may run on default)"
+fi
+
+# 2.c — Hériter config + auth du profile default (first boot only)
+# Au tout premier boot, le profile client n'a ni config.yaml ni auth.json.
+# On copie depuis le default pour éviter "No inference provider configured".
+# Idempotent : ne touche pas si les fichiers existent déjà côté client.
+if [[ -f "${DATA_DIR}/config.yaml" ]] && [[ ! -f "${PROFILE_PATH}/config.yaml" ]]; then
+  log "Inheriting config.yaml from default → ${CLIENT_SLUG}"
+  cp "${DATA_DIR}/config.yaml" "${PROFILE_PATH}/config.yaml"
+fi
+if [[ -f "${DATA_DIR}/auth.json" ]] && [[ ! -f "${PROFILE_PATH}/auth.json" ]]; then
+  log "Inheriting auth.json from default → ${CLIENT_SLUG}"
+  cp "${DATA_DIR}/auth.json" "${PROFILE_PATH}/auth.json"
 fi
 
 # =============================================================================
