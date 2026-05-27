@@ -624,10 +624,17 @@ log "  dashboard PID=${DASH_PID}"
 #   • Par défaut `*` pour le POC. En prod, restreindre au domaine du React
 #     tenant (ex: hermes-${CLIENT_SLUG}.webstate.pro) via env WEBUI_CORS_ORIGINS.
 if [[ "${WEBUI_ENABLED}" == "true" ]] && command -v hermes-web-ui >/dev/null 2>&1; then
-  WEBUI_HOME="${DATA_DIR}/.hermes-web-ui"
+  # WEBUI_HOME doit être sur /opt/data (volume Coolify persisté), PAS /data
+  # qui est ephemeral dans cette image legacy (mount inversion : DATA_DIR=/data
+  # mais le volume Coolify est mounté à /opt/data). Le bootstrap legacy a son
+  # bug propre, on contourne ici pour que la DB SQLite hermes-web-ui survive
+  # aux redeploys (sinon admin user + sessions Web UI perdus à chaque update).
+  WEBUI_HOME="${WEBUI_HOME_OVERRIDE:-/opt/data/.hermes-web-ui}"
   mkdir -p "${WEBUI_HOME}"
 
   # First boot only : seed admin user (idempotent par check existence DB).
+  # En prod, à remplacer immédiatement via /api/auth/change-password ou via
+  # WEBUI_ADMIN_PASSWORD env injecté par le control-plane au provisioning.
   if [[ ! -f "${WEBUI_HOME}/hermes-web-ui.db" ]]; then
     log "Hermes Web UI: first boot — seeding default admin (admin/123456)"
     HERMES_WEB_UI_HOME="${WEBUI_HOME}" \
@@ -636,19 +643,28 @@ if [[ "${WEBUI_ENABLED}" == "true" ]] && command -v hermes-web-ui >/dev/null 2>&
   fi
 
   log "Starting Hermes Web UI (port ${WEBUI_PORT})"
+  # IMPORTANT : on doit lancer node depuis le module dir (cwd = module dir)
+  # car hermes-web-ui v0.6.x résout son data dir relatif au cwd
+  # ("packages/server/data") au lieu de $HERMES_WEB_UI_HOME — bug upstream.
+  # Sans cd, mkdir '/home/hermes/packages/server/data' → EACCES → crash boot.
+  WEBUI_MODULE_DIR="$(npm root -g 2>/dev/null)/hermes-web-ui"
+  if [[ ! -d "${WEBUI_MODULE_DIR}" ]]; then
+    WEBUI_MODULE_DIR="/usr/local/lib/node_modules/hermes-web-ui"
+  fi
   # Lance le node directement plutôt que `hermes-web-ui start` qui daemon-ise
   # via PID file (incompatible avec notre supervision tini/bootstrap : un
   # daemon détaché survit au shutdown signal et bloque container restart).
-  PROFILE="${CLIENT_SLUG}" \
+  ( cd "${WEBUI_MODULE_DIR}" && \
+    PROFILE="${CLIENT_SLUG}" \
     HERMES_WEB_UI_HOME="${WEBUI_HOME}" \
     PORT="${WEBUI_PORT}" \
     BIND_HOST="${WEBUI_HOST}" \
     CORS_ORIGINS="${WEBUI_CORS_ORIGINS:-*}" \
     LOG_LEVEL="${WEBUI_LOG_LEVEL:-info}" \
-    node /usr/local/lib/node_modules/hermes-web-ui/dist/server/index.js \
-    > "${DATA_DIR}/webui.log" 2>&1 &
+    exec node dist/server/index.js \
+  ) > /opt/data/webui.log 2>&1 &
   WEBUI_PID=$!
-  log "  webui PID=${WEBUI_PID}"
+  log "  webui PID=${WEBUI_PID} cwd=${WEBUI_MODULE_DIR} home=${WEBUI_HOME}"
 elif [[ "${WEBUI_ENABLED}" == "true" ]]; then
   warn "WEBUI_ENABLED=true mais hermes-web-ui binary absent — rebuild l'image avec Dockerfile à jour (Sprint 5)"
 else
@@ -661,20 +677,25 @@ log "Bootstrap complete — dashboard + gateway + webui running"
 # PUT /api/config that resets unspecified fields to defaults).
 
 # =============================================================================
-# 7. Wait for any server to die — propagate exit code
+# 7. Wait for gateway OR dashboard to die — propagate exit code
 # =============================================================================
 # `wait -n PID...` waits for one of the SPECIFIC children to exit. Without
 # the PID list, `wait -n` would also catch the `apply_default_model`
 # background task (which is supposed to exit quickly after seeding the
-# config) and shut the container down. We only care about the long-running
-# servers : gateway + dashboard + (optional) webui.
+# config) and shut the container down. We only care about the *critical*
+# servers : gateway + dashboard.
+#
+# DESIGN — webui n'est PAS dans le wait :
+#   Si hermes-web-ui crash, on ne veut PAS tuer le container entier (qui
+#   ferait crash gateway + dashboard, donc downtime du tenant). Le webui
+#   est un service secondaire (UI admin tenant), sa panne doit être
+#   contenue et debuggable via docker logs sans impact sur le chat E2E.
+#   Pour respawn webui après crash, utiliser :
+#     docker exec -u hermes <tenant> /usr/local/bin/restart-webui.sh
+#   (ou redéployer le container).
 set +e
-if [[ -n "${WEBUI_PID}" ]]; then
-  wait -n "${GW_PID}" "${DASH_PID}" "${WEBUI_PID}"
-else
-  wait -n "${GW_PID}" "${DASH_PID}"
-fi
+wait -n "${GW_PID}" "${DASH_PID}"
 EXIT_CODE=$?
 set -e
-warn "A long-running server exited with code ${EXIT_CODE} — shutting down siblings"
+warn "A critical server (gateway/dashboard) exited with code ${EXIT_CODE} — shutting down siblings"
 shutdown
