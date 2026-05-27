@@ -92,8 +92,16 @@ RUN set -eux; \
     ln -sf /opt/node24/bin/node /usr/local/bin/node; \
     ln -sf /opt/node24/bin/npm  /usr/local/bin/npm; \
     ln -sf /opt/node24/bin/npx  /usr/local/bin/npx; \
+    # IMPORTANT : forcer le npm global prefix à /usr/local. Par défaut, npm
+    # utilise le dir du binaire node (= /opt/node24), donc `npm install -g`
+    # poserait les modules dans /opt/node24/lib/node_modules/ et les bins
+    # dans /opt/node24/bin/ — ce dernier n'étant PAS dans le PATH par défaut,
+    # le `which hermes-web-ui` du build suivant échouerait silencieusement.
+    npm config set prefix /usr/local --global; \
+    mkdir -p /usr/local/lib/node_modules /usr/local/bin; \
     node --version; \
     npm --version; \
+    echo "npm prefix : $(npm config get prefix)"; \
     # Sanity : node:sqlite doit être importable sans flag
     node -e "require('node:sqlite'); console.log('node:sqlite ok')"
 
@@ -101,10 +109,15 @@ RUN set -eux; \
 # de web-ui puisse spawn ses propres process Hermès. Le module est chown au
 # user hermes (10000) car hermes-web-ui v0.6.x écrit dans dist/data/ au runtime
 # (bug/design upstream — à reporter à EKKOLearnAI).
+#
+# On utilise `npm root -g` pour localiser dynamiquement le module dir plutôt
+# que de hardcoder /usr/local/lib/node_modules — robuste si npm prefix change.
 RUN set -eux; \
     npm install -g hermes-web-ui; \
     ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes; \
-    chown -R 10000:10000 /usr/local/lib/node_modules/hermes-web-ui; \
+    WEBUI_MODULE_DIR="$(npm root -g)/hermes-web-ui"; \
+    echo "Web UI installed at: ${WEBUI_MODULE_DIR}"; \
+    chown -R 10000:10000 "${WEBUI_MODULE_DIR}"; \
     which hermes-web-ui; \
     hermes-web-ui -v
 
