@@ -71,6 +71,43 @@ RUN set -eux; \
         || echo "[build] rtk-hermes pip install skipped (pip absent or install failed) — install at runtime"; \
     fi
 
+# =============================================================================
+# Sprint 5 — Hermes Web UI : dashboard tenant production-ready (EKKOLearnAI)
+# =============================================================================
+# Embarqué dans chaque container tenant comme backend API pour le React
+# Hermès Platform. Source : github.com/EKKOLearnAI/hermes-web-ui (6.2k⭐).
+# Expose 108 endpoints REST documentés OpenAPI 0.5.x + sessions DB SQLite
+# locale + bridge Python pour spawn sessions Hermès.
+#
+# Pourquoi Node 24 LTS : hermes-web-ui >=0.6.x utilise le module built-in
+# `node:sqlite` (stable depuis Node 24, --experimental requis avant). Les
+# paquets Debian Trixie sont figés sur Node 20 → on extrait les binaires
+# officiels nodejs.org dans /opt/node24 et symlink dans /usr/local/bin.
+RUN set -eux; \
+    NODE_VER=v24.16.0; \
+    mkdir -p /opt/node24; \
+    curl -fsSL "https://nodejs.org/dist/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" -o /tmp/node24.tar.xz; \
+    tar -xJf /tmp/node24.tar.xz --strip-components=1 -C /opt/node24; \
+    rm /tmp/node24.tar.xz; \
+    ln -sf /opt/node24/bin/node /usr/local/bin/node; \
+    ln -sf /opt/node24/bin/npm  /usr/local/bin/npm; \
+    ln -sf /opt/node24/bin/npx  /usr/local/bin/npx; \
+    node --version; \
+    npm --version; \
+    # Sanity : node:sqlite doit être importable sans flag
+    node -e "require('node:sqlite'); console.log('node:sqlite ok')"
+
+# Install hermes-web-ui + symlink le binaire hermes pour que le bridge Python
+# de web-ui puisse spawn ses propres process Hermès. Le module est chown au
+# user hermes (10000) car hermes-web-ui v0.6.x écrit dans dist/data/ au runtime
+# (bug/design upstream — à reporter à EKKOLearnAI).
+RUN set -eux; \
+    npm install -g hermes-web-ui; \
+    ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes; \
+    chown -R 10000:10000 /usr/local/lib/node_modules/hermes-web-ui; \
+    which hermes-web-ui; \
+    hermes-web-ui -v
+
 # Pre-create the directory layout the runtime expects.
 # /opt/hermes-template = pristine read-only assets shipped in the image.
 # /data, /skills, /profiles = mounted volumes (writable, persisted).
@@ -96,9 +133,10 @@ USER root
 WORKDIR /home/hermes
 
 # Ports
-#   8642 -> Hermes FastAPI (skills HTTP + webhooks)
-#   9119 -> optional internal Hermes admin/dashboard
-EXPOSE 8642 9119
+#   8642 -> Hermes gateway aiohttp (OpenAI-compat /v1/chat/completions)
+#   9119 -> Hermes dashboard natif FastAPI (read-only, sert le healthcheck)
+#   8648 -> Hermes Web UI Koa BFF (/api/* pour le React Hermès Platform)
+EXPOSE 8642 9119 8648
 
 # Healthcheck. Bootstrap touches /data/.ready once channels + skills are loaded,
 # THEN the FastAPI /health endpoint is the source of truth.

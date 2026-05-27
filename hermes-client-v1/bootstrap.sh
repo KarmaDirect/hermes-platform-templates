@@ -5,9 +5,11 @@
 # Runs as PID 1 (under tini) on every container start. Idempotent: safe to
 # re-run after a redeploy, won't clobber existing profile state on /data.
 #
-# Two HTTP servers run side-by-side:
-#   • Dashboard   (FastAPI, port 9119)  — read-only UI + /api/* + OAuth
-#   • Gateway     (aiohttp, port 8642)  — OpenAI-compatible /v1/chat/completions
+# Three HTTP servers run side-by-side:
+#   • Dashboard      (FastAPI, port 9119)  — read-only natif + healthcheck
+#   • Gateway        (aiohttp, port 8642)  — OpenAI-compat /v1/chat/completions
+#   • Hermes Web UI  (Koa Node, port 8648) — /api/* (108 endpoints) pour le
+#                                            React Hermès Platform via Traefik
 #
 # Steps:
 #   1. Render config templates with envsubst -> /data/config/
@@ -15,8 +17,8 @@
 #   3. Activate channels that have non-empty credentials
 #   4. Activate skills listed in $ENABLED_SKILLS
 #   5. Start dashboard (bg) + gateway (bg)
-#   6. Apply default model (best-effort, idempotent)
-#   7. Wait for either child to die — propagate exit code
+#   6. Start Hermes Web UI (bg) — first boot seeds admin/123456
+#   7. Wait for any server to die — propagate exit code
 # =============================================================================
 
 set -euo pipefail
@@ -45,6 +47,10 @@ DASHBOARD_HOST="${DASHBOARD_HOST:-0.0.0.0}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-9119}"
 GATEWAY_HOST="${GATEWAY_HOST:-0.0.0.0}"
 GATEWAY_PORT="${GATEWAY_PORT:-8642}"
+# Hermes Web UI — Koa BFF embarqué (Sprint 5). Désactivable via WEBUI_ENABLED=false.
+WEBUI_HOST="${WEBUI_HOST:-0.0.0.0}"
+WEBUI_PORT="${WEBUI_PORT:-8648}"
+WEBUI_ENABLED="${WEBUI_ENABLED:-true}"
 
 # ---------- Required env ----------
 : "${CLIENT_SLUG:?CLIENT_SLUG must be set}"
@@ -541,13 +547,15 @@ apply_canonical_config
 touch "${INIT_MARKER}"
 touch "${READY_FILE}"
 
-# Trap so SIGTERM from Docker shuts down both children cleanly.
+# Trap so SIGTERM from Docker shuts down all children cleanly.
 GW_PID=""
 DASH_PID=""
+WEBUI_PID=""
 shutdown() {
   log "Received signal — stopping children"
-  [[ -n "${GW_PID}"   ]] && kill "${GW_PID}"   2>/dev/null || true
-  [[ -n "${DASH_PID}" ]] && kill "${DASH_PID}" 2>/dev/null || true
+  [[ -n "${GW_PID}"    ]] && kill "${GW_PID}"    2>/dev/null || true
+  [[ -n "${DASH_PID}"  ]] && kill "${DASH_PID}"  2>/dev/null || true
+  [[ -n "${WEBUI_PID}" ]] && kill "${WEBUI_PID}" 2>/dev/null || true
   wait 2>/dev/null || true
   exit 0
 }
@@ -590,22 +598,83 @@ TERMINAL_CWD="${DATA_DIR}" \
 DASH_PID=$!
 log "  dashboard PID=${DASH_PID}"
 
-log "Bootstrap complete — dashboard + gateway running"
+# =============================================================================
+# 6. Start Hermes Web UI (Koa BFF — backend API pour le React Hermès Platform)
+# =============================================================================
+# Sprint 5 — Embarqué depuis github.com/EKKOLearnAI/hermes-web-ui (6.2k⭐).
+# Sert /api/* (108 endpoints OpenAPI 0.5.x) au React Hermès Platform via
+# reverse proxy Traefik. Coexiste avec gateway natif (8642) et dashboard
+# natif (9119) sans conflit — chaque service a son port.
+#
+# Architecture :
+#   • DB SQLite locale : /opt/data/.hermes-web-ui/hermes-web-ui.db
+#     → stocke users Web UI + sessions Web UI. Le state.db du profile Hermès
+#     reste source of truth pour l'historique conversations natif.
+#   • PROFILE=${CLIENT_SLUG} : pointe sur le bon profile du tenant.
+#   • Bridge Python (hermes_bridge.py) : spawn par node, parle au CLI hermes
+#     via IPC unix socket /tmp/hermes-agent-bridge.sock.
+#
+# Auth :
+#   • First boot only : créé admin/123456 via `hermes-web-ui reset-default-login`
+#     (idempotent — skip si la DB existe déjà pour ne pas reset le password en
+#     prod). À changer immédiatement via UI ou endpoint /api/auth/change-password.
+#   • Le React tape sur /api/* avec un JWT Bearer obtenu via /api/auth/login.
+#
+# CORS_ORIGINS :
+#   • Par défaut `*` pour le POC. En prod, restreindre au domaine du React
+#     tenant (ex: hermes-${CLIENT_SLUG}.webstate.pro) via env WEBUI_CORS_ORIGINS.
+if [[ "${WEBUI_ENABLED}" == "true" ]] && command -v hermes-web-ui >/dev/null 2>&1; then
+  WEBUI_HOME="${DATA_DIR}/.hermes-web-ui"
+  mkdir -p "${WEBUI_HOME}"
+
+  # First boot only : seed admin user (idempotent par check existence DB).
+  if [[ ! -f "${WEBUI_HOME}/hermes-web-ui.db" ]]; then
+    log "Hermes Web UI: first boot — seeding default admin (admin/123456)"
+    HERMES_WEB_UI_HOME="${WEBUI_HOME}" \
+      hermes-web-ui reset-default-login 2>&1 | head -5 \
+      || warn "  reset-default-login failed (continuing — login won't work until fixed)"
+  fi
+
+  log "Starting Hermes Web UI (port ${WEBUI_PORT})"
+  # Lance le node directement plutôt que `hermes-web-ui start` qui daemon-ise
+  # via PID file (incompatible avec notre supervision tini/bootstrap : un
+  # daemon détaché survit au shutdown signal et bloque container restart).
+  PROFILE="${CLIENT_SLUG}" \
+    HERMES_WEB_UI_HOME="${WEBUI_HOME}" \
+    PORT="${WEBUI_PORT}" \
+    BIND_HOST="${WEBUI_HOST}" \
+    CORS_ORIGINS="${WEBUI_CORS_ORIGINS:-*}" \
+    LOG_LEVEL="${WEBUI_LOG_LEVEL:-info}" \
+    node /usr/local/lib/node_modules/hermes-web-ui/dist/server/index.js \
+    > "${DATA_DIR}/webui.log" 2>&1 &
+  WEBUI_PID=$!
+  log "  webui PID=${WEBUI_PID}"
+elif [[ "${WEBUI_ENABLED}" == "true" ]]; then
+  warn "WEBUI_ENABLED=true mais hermes-web-ui binary absent — rebuild l'image avec Dockerfile à jour (Sprint 5)"
+else
+  log "Hermes Web UI désactivé (WEBUI_ENABLED=${WEBUI_ENABLED})"
+fi
+
+log "Bootstrap complete — dashboard + gateway + webui running"
 # Note: apply_default_model removed (Sprint 4) — replaced by apply_canonical_config
 # in step 4.7 which writes /opt/data/config.yaml directly (avoids buggy
 # PUT /api/config that resets unspecified fields to defaults).
 
 # =============================================================================
-# 7. Wait for either child to die — propagate exit code
+# 7. Wait for any server to die — propagate exit code
 # =============================================================================
 # `wait -n PID...` waits for one of the SPECIFIC children to exit. Without
 # the PID list, `wait -n` would also catch the `apply_default_model`
 # background task (which is supposed to exit quickly after seeding the
 # config) and shut the container down. We only care about the long-running
-# servers : gateway + dashboard.
+# servers : gateway + dashboard + (optional) webui.
 set +e
-wait -n "${GW_PID}" "${DASH_PID}"
+if [[ -n "${WEBUI_PID}" ]]; then
+  wait -n "${GW_PID}" "${DASH_PID}" "${WEBUI_PID}"
+else
+  wait -n "${GW_PID}" "${DASH_PID}"
+fi
 EXIT_CODE=$?
 set -e
-warn "A long-running server exited with code ${EXIT_CODE} — shutting down sibling"
+warn "A long-running server exited with code ${EXIT_CODE} — shutting down siblings"
 shutdown
